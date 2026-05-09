@@ -340,8 +340,6 @@ export function stateConfig() {
 
                     // 建立初始快照（dirty check 基準）— 必須在解鎖前建立
                     this.savedState = JSON.parse(JSON.stringify(this.form));
-                    // Clip（獨立 state，不進 form，savedState 不含此欄位，isDirty 不受 toggle 影響）
-                    this.clipEnabled = config.clip?.enabled === true;
                     this.savedOpenaiUseCustomModel = this.openaiUseCustomModel;
                     // 解鎖表單（config hydrate 完成）
                     this._configLoading = false;

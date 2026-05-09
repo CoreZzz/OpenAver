@@ -211,8 +211,6 @@ async def showcase_page(request: Request):
     """Showcase 頁面"""
     context = get_common_context(request)
     context["page"] = "showcase"
-    # 過渡：規則式 ranker 取代 CLIP（v0.8.7）；hardcoded False 保 showcase.html {{ clip_enabled | tojson }} 不爆 Undefined。57c 完整移除 SSR gate。
-    context["clip_enabled"] = False
     return templates.TemplateResponse(request, "showcase.html", context)
 
 

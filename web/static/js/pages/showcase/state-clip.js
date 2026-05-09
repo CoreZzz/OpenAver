@@ -223,7 +223,6 @@ export function stateClip() {
      */
     async openClipMode() {
       if (this.clipModeAnimating) return;
-      if (!this.clipEnabled) return;              // Fix 4 (codex P2): disabled 時靜默不動
       if (this.showFavoriteActresses) return;     // CD-56C-13 fail-safe
       if (!this.currentLightboxVideo) return;     // 無 lightbox video metadata 時 no-op
 

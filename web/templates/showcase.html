@@ -528,10 +528,9 @@
                 </button>
 
                 <!-- 56c-T3fix: Magic 按鈕（與 .lightbox-close 鏡射對稱，video mode only）
-                     56c-T4: 直接呼叫 openClipMode()——sparkle burst 已搬至 state-clip openClipMode 流程內部統一管理
-                     Fix 4 (codex P2): clipEnabled gate — 未啟用時完全隱藏，避免撞 503 -->
+                     56c-T4: 直接呼叫 openClipMode()——sparkle burst 已搬至 state-clip openClipMode 流程內部統一管理 -->
                 <button class="lightbox-clip-btn"
-                        x-show="currentLightboxVideo && !currentLightboxActress && !showFavoriteActresses && clipEnabled"
+                        x-show="currentLightboxVideo && !currentLightboxActress && !showFavoriteActresses"
                         @click="openClipMode()"
                         :aria-label="t('similar_mode.button_aria_label')">
                     <i class="bi bi-magic" aria-hidden="true"></i>
@@ -1239,8 +1238,7 @@
 <!-- M2c: 傳遞 config 給 JS -->
 <script>
 window.__SHOWCASE_CONFIG__ = {{ (config.gallery or {}) | tojson | safe }};
-// Fix 4 (codex P2): server-side render clip.enabled → Alpine clipEnabled gate
-window.__CLIP_ENABLED__ = {{ clip_enabled | tojson | safe }};
+
 </script>
 <!-- B5: animations.js 在 ESM main.js 之前載入（透過 extra_js defer） -->
 <script src="/static/js/pages/showcase/animations.js"></script>

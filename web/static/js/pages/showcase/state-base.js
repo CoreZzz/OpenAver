@@ -119,9 +119,6 @@ export function _killLightboxTimelines(options) {
 
 export function stateBase() {
     return {
-        // Fix 4 (codex P2): clip.enabled gate — server-side rendered via window.__CLIP_ENABLED__
-        // magic 按鈕（bi-magic）與 openClipMode 只在 clipEnabled=true 時可用
-        clipEnabled: !!(window.__CLIP_ENABLED__),
 
         // 56c-fix: clip exit standalone video — 當 _clipLastDrilledNumber 不在 _filteredVideos 時，
         // closeClipMode 直接把 clipResults 的最後鑽入 item 包成 standalone lightbox source。
