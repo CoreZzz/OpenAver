@@ -527,8 +527,8 @@
     "batch_enrich_done_with_errors": "批次補完（部分失敗）",
     "batch_enrich_failed": "批次補完中斷"
   },
-  "clip_mode": {
-    "button_aria_label": "探索視覺相似",
+  "similar_mode": {
+    "button_aria_label": "探索相似影片",
     "close": "關閉",
     "fetch_failed": "載入失敗"
   },
@@ -845,24 +845,24 @@
       "other_gallery": "Lightbox 可開啟劇照瀏覽（點擊「劇照」按鈕）",
       "other_per_page": "每頁顯示數量可在<strong>設定頁</strong>調整"
     },
-    "clip": {
-      "title": "以圖搜圖（Beta）",
-      "intro": "在 Lightbox 點 <i class=\"bi bi-magic\"></i> 魔杖按鈕，AI 會找出視覺風格、構圖、女優最相似的 12 部影片，以星座般的方式環繞主圖呈現。",
+    "similar": {
+      "title": "相似影片探索（規則式）",
+      "intro": "點 Lightbox 魔杖按鈕 → 12 顆探索星辰繞主圖排列；星辰依 tag 規則式相似度（IDF 加權 + 系列 / 片商 / 年份 / cast 多訊號）排序，無需下載任何模型，開箱即用。",
       "h6_what": "原理",
-      "what_principle": "用 OpenAI CLIP 模型把每張封面轉換成 512 維特徵向量，計算 cosine similarity 找出最相似者。",
-      "what_crop": "封面在進入 CLIP 前自動裁切右半邊（JAV 排版通常左半是文字，右半是女優），避免標題雜訊干擾比對。",
-      "what_diversity": "對「相同女優」的候選影片自動降權（−0.15），讓「相似服裝/場景但不同女優」的驚喜結果浮上來。",
+      "what_principle": "主訊號採用 IDF 加權 Jaccard — 罕見 tag 的命中加分更高；再結合系列 / 片商 / 年份 / cast 多訊號綜合評分。",
+      "what_crop": "系列完全相符時額外加成，讓同系列影片優先浮上來。",
+      "what_diversity": "MMR diversity rerank（λ=0.7）讓最終 12 顆結果兼顧相似度與多樣性。",
       "h6_use": "使用方式",
-      "use_lightbox": "在 Showcase 影片模式打開 Lightbox → 左上角魔杖按鈕 <i class=\"bi bi-magic\"></i> → 0.4s 光帶預演 → 進入星空模式",
-      "use_constellation": "12 顆星辰繞中央主圖排列，亮度與星線粗細表示相似度；點任一顆即「鑽入」變成新主圖，無止境探索",
+      "use_lightbox": "在 Showcase 影片模式打開 Lightbox → 左上角魔杖按鈕 <i class=\"bi bi-magic\"></i> → 進入星空模式",
+      "use_constellation": "12 顆星辰繞中央主圖排列；點任一顆即「鑽入」變成新主圖，無止境探索",
       "use_mobile": "手機（&lt; 768px）降級為主圖下方 grid 顯示前 4 張，不做星空動畫",
-      "h6_beta": "Beta 限制",
-      "beta_uncensored": "對<strong>無碼/FC2/老 compilation</strong> 等非標準排版封面，比對精準度可能下降（這類封面排版不遵守左標題右女優的慣例）",
-      "beta_compilation": "建議先在 Settings 啟用後跑一輪，肉眼判斷結果是否符合預期再決定是否常駐",
-      "h6_manage": "啟用 / 關閉",
-      "manage_enable": "Settings → 圖像策略 → 開啟「以圖搜圖（Beta）」 → 自動下載 80MB 模型 → 自動建立首次索引（速度依硬體 30s ~ 數分鐘）→ 完成後即可使用",
-      "manage_disable": "關閉開關 → 警告 modal 二次確認 → 刪除模型檔 + 清空所有 CLIP 索引（不影響其他資料）",
-      "manage_scanner": "之後新增的影片會在 Scanner「產生網頁」時自動建立 CLIP 索引（背景進行，無提示）"
+      "h6_beta": "使用限制",
+      "beta_uncensored": "對<strong>無碼/FC2/老 compilation</strong> 等非標準排版封面，無 metadata 的影片會落入 Tier 3/4（隨機補位），結果相關度較低",
+      "beta_compilation": "tag 越完整（系列 / 片商 / cast）相似度越準；tag 很少的影片建議先補完 NFO",
+      "h6_manage": "使用提示",
+      "manage_enable": "無需設定，開箱即用",
+      "manage_disable": "如不需要此功能，可在 Settings 中關閉魔杖按鈕顯示",
+      "manage_scanner": "新增影片後 Scanner「產生網頁」時自動更新索引，無需手動操作"
     },
     "shortcuts": {
       "title": "快捷鍵",

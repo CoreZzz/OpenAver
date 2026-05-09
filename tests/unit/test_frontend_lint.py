@@ -1136,8 +1136,8 @@ class TestScrapeToastI18nGuard:
                     f"{locale}.json {dotted!r} must not be empty string"
 
 
-class TestClipModeI18nGuard:
-    """56c-T3: 守衛 Clip Mode 入口按鈕 i18n key（zh_TW.json）"""
+class TestSimilarModeI18nGuard:
+    """57c-T1a: 守衛 Similar Mode 入口按鈕 i18n key（zh_TW.json）"""
 
     def _locale(self, name):
         return json.loads((LOCALES_ROOT / name).read_text(encoding="utf-8"))
@@ -1151,14 +1151,14 @@ class TestClipModeI18nGuard:
             cur = cur[k]
         return cur
 
-    def test_zh_tw_has_clip_mode_button_aria_label(self):
-        """zh_TW.json 必須有 clip_mode.button_aria_label，且為非空字串"""
+    def test_zh_tw_has_similar_mode_button_aria_label(self):
+        """zh_TW.json 必須有 similar_mode.button_aria_label，且為非空字串"""
         data = self._locale("zh_TW.json")
-        val = self._get_nested(data, "clip_mode.button_aria_label")
+        val = self._get_nested(data, "similar_mode.button_aria_label")
         assert val is not None, \
-            "zh_TW.json missing: 'clip_mode.button_aria_label'"
+            "zh_TW.json missing: 'similar_mode.button_aria_label'"
         assert isinstance(val, str) and len(val) > 0, \
-            "zh_TW.json 'clip_mode.button_aria_label' must not be empty string"
+            "zh_TW.json 'similar_mode.button_aria_label' must not be empty string"
 
 
 class TestClipStageGuard:

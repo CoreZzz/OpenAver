@@ -533,7 +533,7 @@
                 <button class="lightbox-clip-btn"
                         x-show="currentLightboxVideo && !currentLightboxActress && !showFavoriteActresses && clipEnabled"
                         @click="openClipMode()"
-                        :aria-label="t('clip_mode.button_aria_label')">
+                        :aria-label="t('similar_mode.button_aria_label')">
                     <i class="bi bi-magic" aria-hidden="true"></i>
                 </button>
 
@@ -955,7 +955,7 @@
         <!-- X 關閉按鈕（backdrop scope，相對 viewport 角，不在 inner 內） -->
         <button class="clip-close-btn"
                 @click="closeClipMode()"
-                :aria-label="t('clip_mode.close')">
+                :aria-label="t('similar_mode.close')">
             <i class="bi bi-x-lg"></i>
         </button>
 

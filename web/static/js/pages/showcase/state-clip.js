@@ -1232,7 +1232,7 @@ export function stateClip() {
       const url = '/api/similar-covers/by-number/' + encodeURIComponent(number) + '?limit=12';
       const resp = await fetch(url);
       if (!resp.ok) {
-        this.showToast(window.t('clip_mode.fetch_failed'), 'error');
+        this.showToast(window.t('similar_mode.fetch_failed'), 'error');
         throw new Error('clip fetch failed: ' + resp.status);
       }
       return resp.json();
