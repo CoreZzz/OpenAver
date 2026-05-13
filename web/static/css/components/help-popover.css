@@ -60,12 +60,14 @@
 
 /* ── Tag Alias AI Hint Popover ─────────────────────────────────────────────── */
 
-/* 錨點容器：相對定位 + inline-flex 不撐滿整行 */
+/* 錨點容器：相對定位 + inline-flex 不撐滿整行
+   margin-right: auto 把後續 chevron 推到最右，(?) 保持貼著 title */
 .tag-alias-ai-hint-wrap {
     position: relative;
     display: inline-flex;
     align-items: center;
     margin-left: 0.25rem;
+    margin-right: auto;
 }
 
 /* 右側定位：從 icon 右方延伸，垂直置中對齊 icon */
