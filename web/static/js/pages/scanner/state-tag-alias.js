@@ -44,10 +44,10 @@ export function stateTagAlias() {
                 if (result.success) {
                     this.tagAliasRecords = result.groups || [];
                 } else {
-                    this.tagAliasRecordsError = '載入失敗: ' + (result.error || '未知錯誤');
+                    this.tagAliasRecordsError = window.t('scanner.tag_alias.error.load_failed', { error: result.error || window.t('scanner.tag_alias.error.unknown') });
                 }
             } catch (e) {
-                this.tagAliasRecordsError = '載入失敗: ' + e.message;
+                this.tagAliasRecordsError = window.t('scanner.tag_alias.error.load_failed', { error: e.message });
             } finally {
                 this.tagAliasRecordsLoading = false;
             }
@@ -78,14 +78,14 @@ export function stateTagAlias() {
                 const result = await resp.json();
 
                 if (result.success) {
-                    this.showToast('已新增 Tag 別名組：' + name, 'success');
+                    this.showToast(window.t('scanner.tag_alias.toast.add_group_success', { name }), 'success');
                     this.tagAliasInput = '';
                     await this.fetchTagAliasRecords();
                 } else {
-                    this.showToast('新增失敗: ' + (result.error || '未知錯誤'), 'error');
+                    this.showToast(window.t('scanner.tag_alias.error.add_failed', { error: result.error || window.t('scanner.tag_alias.error.unknown') }), 'error');
                 }
             } catch (e) {
-                this.showToast('新增失敗: ' + e.message, 'error');
+                this.showToast(window.t('scanner.tag_alias.error.add_failed', { error: e.message }), 'error');
             } finally {
                 this.newTagGroupAdding = false;
             }
@@ -125,13 +125,13 @@ export function stateTagAlias() {
                 const result = await resp.json();
 
                 if (result.success) {
-                    this.showToast('已刪除：' + name, 'success');
+                    this.showToast(window.t('scanner.tag_alias.toast.delete_success', { name }), 'success');
                     await this.fetchTagAliasRecords();
                 } else {
-                    this.showToast('刪除失敗: ' + (result.error || '未知錯誤'), 'error');
+                    this.showToast(window.t('scanner.tag_alias.error.delete_failed', { error: result.error || window.t('scanner.tag_alias.error.unknown') }), 'error');
                 }
             } catch (e) {
-                this.showToast('刪除失敗: ' + e.message, 'error');
+                this.showToast(window.t('scanner.tag_alias.error.delete_failed', { error: e.message }), 'error');
             } finally {
                 this._deleteTagAliasGroupLoading = false;
                 this.deleteTagAliasGroupModalOpen = false;
@@ -171,10 +171,10 @@ export function stateTagAlias() {
                     this.addingTagAlias = updated;
                     await this.fetchTagAliasRecords();
                 } else {
-                    this.showToast(result.error || '新增別名失敗', 'error');
+                    this.showToast(window.t('scanner.tag_alias.error.add_alias_failed', { error: result.error || window.t('scanner.tag_alias.error.unknown') }), 'error');
                 }
             } catch (e) {
-                this.showToast('新增別名失敗: ' + e.message, 'error');
+                this.showToast(window.t('scanner.tag_alias.error.add_alias_failed', { error: e.message }), 'error');
             } finally {
                 const loading = { ...this.addingTagAliasLoading };
                 delete loading[primary];
@@ -199,10 +199,10 @@ export function stateTagAlias() {
                 if (result.success) {
                     await this.fetchTagAliasRecords();
                 } else {
-                    this.showToast('移除失敗: ' + (result.error || '未知錯誤'), 'error');
+                    this.showToast(window.t('scanner.tag_alias.error.remove_failed', { error: result.error || window.t('scanner.tag_alias.error.unknown') }), 'error');
                 }
             } catch (e) {
-                this.showToast('移除失敗: ' + e.message, 'error');
+                this.showToast(window.t('scanner.tag_alias.error.remove_failed', { error: e.message }), 'error');
             }
         },
     };

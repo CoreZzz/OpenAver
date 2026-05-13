@@ -491,6 +491,18 @@
       "ai_hint": {
         "icon_title": "AI 整理建議",
         "tooltip": "💡 讓 AI agent 透過 /api/capabilities 整理比較快"
+      },
+      "toast": {
+        "add_group_success": "已新增 Tag 別名組：{name}",
+        "delete_success": "已刪除：{name}"
+      },
+      "error": {
+        "unknown": "未知錯誤",
+        "load_failed": "載入失敗: {error}",
+        "add_failed": "新增失敗: {error}",
+        "delete_failed": "刪除失敗: {error}",
+        "add_alias_failed": "新增別名失敗: {error}",
+        "remove_failed": "移除失敗: {error}"
       }
     },
     "dirty_modal": {
