@@ -153,7 +153,8 @@
       "unrecognized": "Cannot identify ID: {filename}",
       "not_found": "No data found for {number}",
       "search_failed": "Search Failed",
-      "connection_error": "Connection error, please try again later"
+      "connection_error": "Connection error, please try again later",
+      "already_organized": "Organized"
     },
     "toast": {
       "no_searchable_files": "No files to search",
@@ -166,7 +167,9 @@
       "no_valid_files": "No valid video files (could not identify number)",
       "desktop_only": "This feature requires the desktop app",
       "load_failed": "Load failed. Please try again.",
-      "translate_failed": "Translation failed. Please try again."
+      "translate_failed": "Translation failed. Please try again.",
+      "db_not_synced": "Not linked — organized files won't appear in Showcase",
+      "db_sync_failed": "DB sync failed (file organized but not showing in Showcase)"
     },
     "duplicate": {
       "title": "Duplicate File",
@@ -343,6 +346,12 @@
       "openai_translate_failed": "Translation test failed",
       "openai_unknown_response_format": "Unknown response format",
       "ja_skip": "Japanese mode: translation skipped"
+    },
+    "favorite_folder": {
+      "pick_from_scanner": "Pick from Scanner folders",
+      "no_directories": "No Scanner folders configured",
+      "linked_text": "✓ Linked to Scanner",
+      "not_linked_text": "⚠ Not linked to Scanner"
     }
   },
   "scanner": {
@@ -475,6 +484,40 @@
       "body_suffix": " videos). You will need to re-scan next time. Are you sure?",
       "cancel": "Cancel",
       "confirm": "Delete"
+    },
+    "tag_alias": {
+      "section_title": "Tag Alias Management",
+      "collapse_title": "Expand / Collapse",
+      "new_group_placeholder": "e.g. メイド / Maid / 女僕",
+      "add": "Add",
+      "loading": "Loading...",
+      "empty": "No tag alias records yet",
+      "add_alias_aria": "Add alias",
+      "delete_group_title": "Delete this tag alias group",
+      "delete_alias_title": "Remove this alias",
+      "error_conflict": "Tag alias conflict",
+      "delete_group_modal": {
+        "title": "Delete Tag Alias Group",
+        "body": "Delete the entire tag alias group \"{name}\"? This cannot be undone.",
+        "cancel": "Cancel",
+        "confirm": "Delete"
+      },
+      "ai_hint": {
+        "icon_title": "AI organization suggestion",
+        "tooltip": "💡 Let an AI agent organize via /api/capabilities for faster results"
+      },
+      "toast": {
+        "add_group_success": "Tag alias group added: {name}",
+        "delete_success": "Deleted: {name}"
+      },
+      "error": {
+        "unknown": "Unknown error",
+        "load_failed": "Load failed: {error}",
+        "add_failed": "Add failed: {error}",
+        "delete_failed": "Delete failed: {error}",
+        "add_alias_failed": "Add alias failed: {error}",
+        "remove_failed": "Remove failed: {error}"
+      }
     }
   },
   "showcase": {
@@ -869,6 +912,24 @@
       "version_load_failed": "Failed to load",
       "check_update_failed": "Check failed, please try again later",
       "check_update_network_error": "Network error, please try again later"
+    },
+    "similar": {
+      "title": "Similar Video Discovery (Rule-based)",
+      "intro": "Click the wand button in Lightbox → 12 discovery stars orbit the main cover; stars are ranked by rule-based tag similarity (IDF-weighted + series / maker / year / cast signals). No model downloads required — works out of the box.",
+      "h6_what": "How it works",
+      "what_principle": "Primary signal uses IDF-weighted Jaccard — rare tag matches score higher; combined with series / maker / year / cast multi-signal scoring.",
+      "what_crop": "Exact series match gets a bonus, bringing same-series videos to the top.",
+      "what_diversity": "MMR diversity rerank (λ=0.7) ensures the final 12 results balance similarity and variety.",
+      "h6_use": "How to use",
+      "use_lightbox": "Open Lightbox in Showcase video mode → click the wand button <i class=\"bi bi-magic\"></i> in the top-left → enter constellation mode",
+      "use_constellation": "12 stars orbit the central main cover; click any star to \"dive in\" and make it the new main — explore endlessly",
+      "use_mobile": "On mobile (&lt; 768px) falls back to a grid of the top 4 results below the main cover, without animation",
+      "h6_beta": "Limitations",
+      "beta_uncensored": "For <strong>uncensored / FC2 / old compilation</strong> covers with non-standard layouts, videos without metadata fall into Tier 3/4 (random fill) with lower relevance",
+      "beta_compilation": "More complete tags (series / maker / cast) means better accuracy; videos with few tags should have their NFO filled in first",
+      "h6_manage": "Tips",
+      "manage_enable": "No configuration needed — works out of the box",
+      "manage_scanner": "After adding videos, the index updates automatically when Scanner generates the webpage — no manual steps needed"
     }
   },
   "tutorial": {
@@ -906,5 +967,10 @@
     "batch_enrich_done": "Batch enrich complete",
     "batch_enrich_done_with_errors": "Batch enrich (some failures)",
     "batch_enrich_failed": "Batch enrich interrupted"
+  },
+  "similar_mode": {
+    "button_aria_label": "Explore similar videos",
+    "close": "Close",
+    "fetch_failed": "Load failed"
   }
 }

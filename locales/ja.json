@@ -153,7 +153,8 @@
       "unrecognized": "品番を識別できません: {filename}",
       "not_found": "{number} のデータが見つかりません",
       "search_failed": "検索失敗",
-      "connection_error": "接続エラー、後でもう一度お試しください"
+      "connection_error": "接続エラー、後でもう一度お試しください",
+      "already_organized": "整理済み"
     },
     "toast": {
       "no_searchable_files": "検索するファイルがありません",
@@ -166,7 +167,9 @@
       "no_valid_files": "有効な動画ファイルがありません（番号を識別できません）",
       "desktop_only": "この機能はデスクトップアプリで使用する必要があります",
       "load_failed": "読み込みに失敗しました。もう一度お試しください",
-      "translate_failed": "翻訳に失敗しました。もう一度お試しください"
+      "translate_failed": "翻訳に失敗しました。もう一度お試しください",
+      "db_not_synced": "未同期 — 整理完了後も Showcase に表示されません",
+      "db_sync_failed": "DB 同期失敗（ファイルは整理済みですが Showcase に表示されません）"
     },
     "duplicate": {
       "title": "ファイルが重複しています",
@@ -343,6 +346,12 @@
       "openai_translate_failed": "翻訳テスト失敗",
       "openai_unknown_response_format": "不明なレスポンス形式",
       "ja_skip": "日本語モード：翻訳スキップ"
+    },
+    "favorite_folder": {
+      "pick_from_scanner": "Scanner のフォルダから選択",
+      "no_directories": "Scanner のフォルダが未設定です",
+      "linked_text": "✓ Scanner と連動済み",
+      "not_linked_text": "⚠ Scanner と未連動"
     }
   },
   "scanner": {
@@ -475,6 +484,40 @@
       "body_suffix": "本）を削除します。次回は再スキャンが必要です。よろしいですか？",
       "cancel": "キャンセル",
       "confirm": "削除する"
+    },
+    "tag_alias": {
+      "section_title": "Tag エイリアス管理",
+      "collapse_title": "展開 / 折りたたむ",
+      "new_group_placeholder": "例：メイド / 女僕 / 女傭",
+      "add": "追加",
+      "loading": "読み込み中...",
+      "empty": "Tag エイリアスの記録がありません",
+      "add_alias_aria": "エイリアスを追加",
+      "delete_group_title": "この Tag エイリアスグループを削除",
+      "delete_alias_title": "このエイリアスを削除",
+      "error_conflict": "Tag エイリアスの競合",
+      "delete_group_modal": {
+        "title": "Tag エイリアスグループを削除",
+        "body": "「{name}」の Tag エイリアスグループをすべて削除しますか？この操作は元に戻せません。",
+        "cancel": "キャンセル",
+        "confirm": "削除を確認"
+      },
+      "ai_hint": {
+        "icon_title": "AI 整理の提案",
+        "tooltip": "💡 AI agent が /api/capabilities を使って整理するほうが速い"
+      },
+      "toast": {
+        "add_group_success": "Tag エイリアスグループを追加しました：{name}",
+        "delete_success": "削除しました：{name}"
+      },
+      "error": {
+        "unknown": "不明なエラー",
+        "load_failed": "読み込み失敗: {error}",
+        "add_failed": "追加失敗: {error}",
+        "delete_failed": "削除失敗: {error}",
+        "add_alias_failed": "エイリアス追加失敗: {error}",
+        "remove_failed": "削除失敗: {error}"
+      }
     }
   },
   "showcase": {
@@ -869,6 +912,24 @@
       "version_load_failed": "読み込み失敗",
       "check_update_failed": "確認に失敗しました。後でもう一度お試しください",
       "check_update_network_error": "ネットワークエラー。後でもう一度お試しください"
+    },
+    "similar": {
+      "title": "類似動画の探索（ルールベース）",
+      "intro": "Lightbox の魔法杖ボタンをクリック → 12 個の探索星が主画像を中心に並ぶ；星は tag のルールベース類似度（IDF 加重 + シリーズ / メーカー / 年 / cast 複合スコア）で並び替え、モデルのダウンロード不要ですぐ使える。",
+      "h6_what": "仕組み",
+      "what_principle": "主シグナルは IDF 加重 Jaccard — レアな tag のヒットはスコアが高くなる；さらにシリーズ / メーカー / 年 / cast の複合スコアで評価。",
+      "what_crop": "シリーズが完全一致の場合はボーナスが加算され、同シリーズの動画が優先表示される。",
+      "what_diversity": "MMR diversity rerank（λ=0.7）により、最終 12 個の結果は類似度と多様性を両立する。",
+      "h6_use": "使い方",
+      "use_lightbox": "Showcase の動画モードで Lightbox を開く → 左上の魔法杖ボタン <i class=\"bi bi-magic\"></i> → 星空モードへ",
+      "use_constellation": "12 個の星が中央の主画像を囲む；どれかをクリックすると「潜り込んで」新しい主画像になり、無限に探索できる",
+      "use_mobile": "スマートフォン（&lt; 768px）ではアニメーションなしで主画像下の grid に上位 4 枚を表示",
+      "h6_beta": "制限事項",
+      "beta_uncensored": "<strong>無修正 / FC2 / 旧 compilation</strong> などの非標準レイアウトのサムネイルや、metadata のない動画は Tier 3/4（ランダム補完）に分類され、関連性が低くなる",
+      "beta_compilation": "tag が多いほど（シリーズ / メーカー / cast）精度が上がる；tag が少ない動画は先に NFO を補完することを推奨",
+      "h6_manage": "使用ヒント",
+      "manage_enable": "設定不要、すぐ使える",
+      "manage_scanner": "動画追加後、Scanner で「ウェブページを生成」するとインデックスが自動更新される。手動操作不要"
     }
   },
   "tutorial": {
@@ -906,5 +967,10 @@
     "batch_enrich_done": "一括補完完了",
     "batch_enrich_done_with_errors": "一括補完（一部失敗）",
     "batch_enrich_failed": "一括補完中断"
+  },
+  "similar_mode": {
+    "button_aria_label": "類似動画を探索",
+    "close": "閉じる",
+    "fetch_failed": "読み込み失敗"
   }
 }

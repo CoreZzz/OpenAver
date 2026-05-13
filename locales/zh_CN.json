@@ -153,7 +153,8 @@
       "unrecognized": "无法识别番号: {filename}",
       "not_found": "找不到 {number} 的资料",
       "search_failed": "搜索失败",
-      "connection_error": "连接错误，请稍后再试"
+      "connection_error": "连接错误，请稍后再试",
+      "already_organized": "已整理"
     },
     "toast": {
       "no_searchable_files": "没有需要搜索的文件",
@@ -166,7 +167,9 @@
       "no_valid_files": "无有效视频文件（无法识别番号）",
       "desktop_only": "此功能需要在桌面应用程序中使用",
       "load_failed": "加载失败，请重试",
-      "translate_failed": "翻译失败，请重试"
+      "translate_failed": "翻译失败，请重试",
+      "db_not_synced": "未联动 — 整理完成后不会出现在 Showcase",
+      "db_sync_failed": "DB 同步失败（文件已整理但未出现在 Showcase）"
     },
     "duplicate": {
       "title": "文件重复",
@@ -343,6 +346,12 @@
       "openai_translate_failed": "翻译测试失败",
       "openai_unknown_response_format": "未知的响应格式",
       "ja_skip": "日文模式：跳过翻译"
+    },
+    "favorite_folder": {
+      "pick_from_scanner": "从 Scanner 文件夹选取",
+      "no_directories": "尚未设置 Scanner 文件夹",
+      "linked_text": "✓ 已联动 Scanner",
+      "not_linked_text": "⚠ 未联动 Scanner"
     }
   },
   "scanner": {
@@ -475,6 +484,40 @@
       "body_suffix": "部），下次需重新扫描才能恢复。确定要清除吗？",
       "cancel": "取消",
       "confirm": "确认删除"
+    },
+    "tag_alias": {
+      "section_title": "Tag 别名管理",
+      "collapse_title": "展开/收起",
+      "new_group_placeholder": "例：メイド / 女仆 / 女佣",
+      "add": "新增",
+      "loading": "加载中...",
+      "empty": "暂无 Tag 别名记录",
+      "add_alias_aria": "新增别名",
+      "delete_group_title": "删除此 Tag 别名组",
+      "delete_alias_title": "移除此别名",
+      "error_conflict": "Tag 别名冲突",
+      "delete_group_modal": {
+        "title": "删除 Tag 别名组",
+        "body": "确定要删除「{name}」的整笔 Tag 别名组吗？此操作无法复原。",
+        "cancel": "取消",
+        "confirm": "确认删除"
+      },
+      "ai_hint": {
+        "icon_title": "AI 整理建议",
+        "tooltip": "💡 让 AI agent 透过 /api/capabilities 整理比较快"
+      },
+      "toast": {
+        "add_group_success": "已新增 Tag 别名组：{name}",
+        "delete_success": "已删除：{name}"
+      },
+      "error": {
+        "unknown": "未知错误",
+        "load_failed": "加载失败: {error}",
+        "add_failed": "新增失败: {error}",
+        "delete_failed": "删除失败: {error}",
+        "add_alias_failed": "新增别名失败: {error}",
+        "remove_failed": "移除失败: {error}"
+      }
     }
   },
   "showcase": {
@@ -869,6 +912,24 @@
       "version_load_failed": "无法载入",
       "check_update_failed": "检查失败，请稍后再试",
       "check_update_network_error": "无法连接，请稍后再试"
+    },
+    "similar": {
+      "title": "相似视频探索（规则式）",
+      "intro": "点 Lightbox 魔杖按钮 → 12 颗探索星辰绕主图排列；星辰依 tag 规则式相似度（IDF 加权 + 系列 / 片商 / 年份 / cast 多信号）排序，无需下载任何模型，开箱即用。",
+      "h6_what": "原理",
+      "what_principle": "主信号采用 IDF 加权 Jaccard — 罕见 tag 的命中加分更高；再结合系列 / 片商 / 年份 / cast 多信号综合评分。",
+      "what_crop": "系列完全相符时额外加成，让同系列视频优先浮上来。",
+      "what_diversity": "MMR diversity rerank（λ=0.7）让最终 12 颗结果兼顾相似度与多样性。",
+      "h6_use": "使用方式",
+      "use_lightbox": "在 Showcase 视频模式打开 Lightbox → 左上角魔杖按钮 <i class=\"bi bi-magic\"></i> → 进入星空模式",
+      "use_constellation": "12 颗星辰绕中央主图排列；点任一颗即「钻入」变成新主图，无止境探索",
+      "use_mobile": "手机（&lt; 768px）降级为主图下方 grid 显示前 4 张，不做星空动画",
+      "h6_beta": "使用限制",
+      "beta_uncensored": "对<strong>无码/FC2/老 compilation</strong> 等非标准排版封面，无 metadata 的视频会落入 Tier 3/4（随机补位），结果相关度较低",
+      "beta_compilation": "tag 越完整（系列 / 片商 / cast）相似度越准；tag 很少的视频建议先补完 NFO",
+      "h6_manage": "使用提示",
+      "manage_enable": "无需设置，开箱即用",
+      "manage_scanner": "新增视频后 Scanner「产生网页」时自动更新索引，无需手动操作"
     }
   },
   "tutorial": {
@@ -906,5 +967,10 @@
     "batch_enrich_done": "批量补完完成",
     "batch_enrich_done_with_errors": "批量补完（部分失败）",
     "batch_enrich_failed": "批量补完中断"
+  },
+  "similar_mode": {
+    "button_aria_label": "探索相似视频",
+    "close": "关闭",
+    "fetch_failed": "加载失败"
   }
 }
