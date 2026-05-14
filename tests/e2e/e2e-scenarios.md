@@ -350,19 +350,260 @@ N/A — Tag alias UI / chip 互動 完全 browser-only。
 
 ## US6: i18n 完整切換
 
-> _T59c-5 待補完_
+**故事**：用戶在 Settings 頁依序切換 4 個 locale（繁 → 简 → あ → EN → 繁）→ 每次切換後驗多頁面 UI 文字在當前語系正確顯示無 raw i18n key → 驗 Dark/Light mode 切換並重載保留 → 驗 tutorial 文案在當前語系正確。
+
+### Setup
+
+- Dev server 已啟動於 `http://localhost:8000`
+- 4 locale 翻譯檔齊全（`locales/zh_TW.json`、`locales/zh_CN.json`、`locales/ja.json`、`locales/en.json`）
+- 重置 locale 為 `zh-TW`（可直接點 `.locale-toggle-btn` 循環或直接呼 API）：
+  ```bash
+  curl -X PUT http://localhost:8000/api/config/general/locale \
+       -H "Content-Type: application/json" -d '{"value":"zh-TW"}'
+  ```
+- DB 有至少 1 部影片（US6 step 6 驗 Scanner 頁時用得到）
+- 清 tutorial flag（確保 tutorial 可在 step 8 重播）：
+  ```js
+  // browser_evaluate
+  localStorage.removeItem('openaver_tutorial_completed');
+  ```
+
+### Steps
+
+1. `browser_navigate` → `http://localhost:8000/settings`；`browser_wait_for` `.locale-toggle-btn` 可見 timeout=3s
+   - **驗**：`.locale-toggle-btn` innerText 為 `繁`（目前 locale = zh-TW）
+2. **切換 zh-TW → zh-CN**：`browser_click` → `.locale-toggle-btn`
+   - `browser_wait_for` 頁面 reload 完成（URL 仍 `/settings`）timeout=5s
+   - `browser_snapshot` 驗：
+     - `.locale-toggle-btn` innerText 為 `简`（locale 已切換）
+     - sidebar `a[href="/showcase"]` 文字**不含** `sidebar.showcase`（無 raw key）
+     - 頁面標題區文字非 `settings.` 開頭字串
+3. **切換 zh-CN → ja**：`browser_click` → `.locale-toggle-btn`
+   - `browser_wait_for` 頁面 reload 完成 timeout=5s
+   - **驗**：`.locale-toggle-btn` innerText 為 `あ`
+   - **驗**：sidebar 任一 `a[href]` innerText **不含** `sidebar.` 字串（無 raw key）
+4. **切換 ja → en**：`browser_click` → `.locale-toggle-btn`
+   - `browser_wait_for` 頁面 reload 完成 timeout=5s
+   - **驗**：`.locale-toggle-btn` innerText 為 `EN`
+   - **驗**：`#saveBtn`（settings.html:762）文字不含 `settings.action.` 字串
+5. **切換 en → zh-TW（回到繁體）**：`browser_click` → `.locale-toggle-btn`
+   - `browser_wait_for` 頁面 reload timeout=5s
+   - **驗**：`.locale-toggle-btn` innerText 回到 `繁`
+6. **Dark/Light mode 切換**：
+   - `browser_click` → `.theme-toggle-btn`（settings.html:40；`@click="toggleThemeWithTransition()"`）
+   - `browser_wait_for` 1s（過場動畫）
+   - **驗**：`html` element 的 `data-theme` attribute 切換（light → dim 或 dim → light）
+   - `browser_navigate` 重新整理 `http://localhost:8000/settings`
+   - `browser_wait_for` `.theme-toggle-btn` 可見 timeout=3s
+   - **驗**：`html[data-theme]` 保留上次切換後的值（重載後不 fallback）
+7. **Scanner 頁 locale 驗收**：`browser_navigate` → `http://localhost:8000/scanner`
+   - `browser_wait_for` `#btnGenerate` 可見 timeout=3s
+   - **驗**：`#btnGenerate` innerText **不含** `scanner.` 字串（無 raw i18n key）
+   - **驗**：頁面任何可見文字**不含** `tutorial.` 字串（在覆蓋 overlay 未開啟的情況下）
+8. **Help 頁 locale 驗收**：`browser_navigate` → `http://localhost:8000/help`
+   - `browser_wait_for` `h2.card-title` 至少 1 個 timeout=3s
+   - **驗**：所有 `h2.card-title` innerText **不含** `help.` 字串（help.html Hero/card 均為 Jinja 渲染，非 raw key）
+   - **驗**：`.terminal-copy-btn` 可見（curl copy 按鈕 render 正常，help.html:71）
+9. **Tutorial 文案 locale 驗收**：`browser_navigate` → `http://localhost:8000/scanner?tutorial=restart`
+   - `browser_wait_for` `#tutorialOverlay.active` timeout=3s
+   - **驗**：`#tutorialTitle`（tutorial.js:97）innerText **不含** `tutorial.step1_title` 字串（當前 locale 應有翻譯顯示，非 raw key）
+   - **驗**：`#tutorialProgress` 文字格式正確（含 `/`，如 `1 / 7`）
+   - `browser_click` → `#tutorialClose` 關閉 tutorial（由 `tutorial.js` 動態建立，行號易漂移）
+
+### 完成後 state
+
+- `html[data-theme]` 保留最後切換的 theme 值
+- `window.__locale` 為 `zh-TW`（最終循環回繁體）
+- `/api/config/general/locale` GET 回傳 `{"value":"zh-TW"}`（可選驗）
+- `#tutorialOverlay` 不存在或無 `.active` class（已關閉）
+- Help 頁所有 `h2.card-title` 無 `help.` 字串
+
+### PyWebView 例外
+
+N/A — locale 切換、Dark/Light mode、tutorial 文案驗收均為 browser-only。Settings 頁最愛資料夾 picker 為 PyWebView-only，本 US 不涉及。
+
+### Regression 偵測點
+
+- locale 切換後某頁出現 raw key（如 `tutorial.step1_title` 顯示在 overlay）→ 對應 locale JSON 缺翻譯或 `window.t()` fallback 未命中；觀察：`#tutorialTitle` innerText 直接是 key 字串
+- Dark mode 重載後 fallback 回 Light → `toggleThemeWithTransition` 沒把 `data-theme` 寫入 DB / localStorage；觀察：`html[data-theme]` 重載後變回預設值
+- locale 循環跳過某個 locale → `cycleLocale()` 的 `order` array 缺項；觀察：`.locale-toggle-btn` 從 `简` 直接跳 `EN`（漏掉 `あ`）
+- Help 頁 Hero 文字出現 `help.hero.` 開頭 raw key → Jinja `t()` 呼叫失敗（locale JSON 缺鍵 + no fallback）
 
 ---
 
 ## US7: 控制狂工作流（進階分流）
 
-> _T59c-5 待補完_
+**故事**：進階用戶在 Settings 自訂命名格式 + 切換搜尋來源 + 關翻譯 → 回 Search 刮削一片驗自訂格式套用 → 在 Scanner 頁新增 Tag Alias group → 最後在 Help 頁複製 AI curl 指令。
+
+### Setup
+
+- Dev server 已啟動於 `http://localhost:8000`
+- DB 有至少 1 部影片，且有一部**尚未刮削**的本地 MP4 fixture（US7 step 4 需要）
+- Settings 已有預設命名格式（`[{num}][{maker}] {title}`）；若不確定可先呼：
+  ```bash
+  curl http://localhost:8000/api/config | python3 -c "import sys,json; print(json.load(sys.stdin).get('organize',{}).get('filename_format',''))"
+  ```
+- 清 Tag Alias（避免 step 5 衝突）：
+  ```bash
+  # 可選：確認現有 tag alias 不含測試用 primary name「アクション」
+  curl http://localhost:8000/api/tag-aliases
+  ```
+
+### Steps
+
+1. **修改命名格式**：`browser_navigate` → `http://localhost:8000/settings`
+   - `browser_wait_for` `#filenameFormat` 可見（settings.html:546）timeout=3s
+   - `browser_triple_click`（或 `browser_click` + Ctrl+A）→ 清空 `#filenameFormat` 輸入框
+   - `browser_type` → `#filenameFormat` 輸入自訂格式字串：`[{num}] {title}`
+   - `browser_click` → `#saveBtn`（settings.html:762；`@submit.prevent="saveConfig"`）
+   - `browser_wait_for` `.toast.toast-end` 可見 timeout=3s（settings.html:823；`_toast.visible`）
+   - **驗**：toast `alert` 含 class `alert-success`（非 `alert-error`）
+2. **切換預設搜尋來源**（primary source 切換）：
+   - 在 Settings 頁找 `.source-badges-row`（settings.html:88）
+   - `browser_snapshot` 觀察目前 `form.primarySource`（`●` 標記的來源）
+   - 若目前為 `javbus`：先 `browser_wait_for` `.source-badges-row` 內 Alpine x-text 渲染完成（timeout=2s，避免 headless 啟動慢命中 raw template）；再 `browser_click` 含 `Jav321` 文字的 badge（或 `.source-badges-row` 內 nth-child(2)）
+   - **驗**：`browser_evaluate` `document.querySelector('.source-badges-row').innerText` 確認 `●` 已換到目標來源
+   - `browser_click` → `#saveBtn`；`browser_wait_for` toast 出現 timeout=3s；**驗** `alert-success`
+   - `browser_navigate` 重新整理 `http://localhost:8000/settings`
+   - `browser_wait_for` `.source-badges-row` 可見 timeout=3s
+   - **驗**：`●` 標記仍在剛切換的來源（設定保留）
+3. **翻譯開關切換**：
+   - `browser_wait_for` `#translateEnabled` 可見（settings.html:198）timeout=3s
+   - `browser_evaluate` 取目前狀態：`document.getElementById('translateEnabled').checked`（記下初始值 `true`/`false`）
+   - `browser_click` → `#translateEnabled`（toggle checkbox）
+   - **驗**：`document.getElementById('translateEnabled').checked` 值翻轉
+   - `browser_click` → `#saveBtn`；`browser_wait_for` toast timeout=3s；**驗** `alert-success`
+   - `browser_navigate` 重新整理 `http://localhost:8000/settings`
+   - `browser_wait_for` `#translateEnabled` 可見 timeout=3s
+   - **驗**：`#translateEnabled` checked 狀態與切換後一致（設定保留）
+   - （測試完還原：再 toggle 一次回原始狀態 + save）
+4. **刮削一片驗自訂命名格式**：`browser_navigate` → `http://localhost:8000/search`
+   - `browser_type` 待測番號（Setup 確認的 fixture 番號）至搜尋輸入框；`browser_press_key` `Enter`
+   - `browser_wait_for` `#resultCard` 可見 timeout=15s
+   - 點 `#btnScrapeAll`（search.html:774）或單片整理按鈕
+   - `browser_wait_for` 整理 SSE 完成 timeout=60s（`#batchProgress` 出現後消失）
+   - **驗**：整理完成後，呼 API 確認檔名已套用自訂格式：
+     ```js
+     // browser_evaluate
+     fetch('/api/search/local-status?numbers=<番號>').then(r => r.json())
+     // 預期 exists: true；可進一步查 DB 內 filename 欄位
+     ```
+5. **Tag Alias 新增**：`browser_navigate` → `http://localhost:8000/scanner`
+   - `browser_wait_for` `#tagAliasCard` 可見（scanner.html:394）timeout=3s
+   - 若 `#tagAliasCard` 卡片折疊（`.tagAliasCardCollapsed === true`）：`browser_click` → `#tagAliasCard .card-title`（點 header 展開；scanner.html:397）
+   - `browser_wait_for` `.tag-alias-wall`（scanner.html:461）或 `.actress-alias-body`（scanner.html:430）可見
+   - `browser_type` `アクション` → `.actress-alias-body input[x-model="tagAliasInput"]`（scanner.html:435）
+   - `browser_click` → `.actress-alias-body button[\\@click="addTagAliasGroup()"]`（scanner.html:440）
+   - `browser_wait_for` `.tag-alias-wall` 出現新 chip timeout=3s
+   - **驗**：`.tag-alias-wall` 內含 `アクション` 文字的 alias chip 出現
+6. **Help curl 複製**：`browser_navigate` → `http://localhost:8000/help`
+   - `browser_wait_for` `.terminal-copy-btn` 可見（help.html:71）timeout=3s
+   - `browser_click` → `.terminal-copy-btn`（`@click="copyCurlCommand()"`）
+   - **驗**：`browser_evaluate` 取剪貼簿內容：
+     ```js
+     navigator.clipboard.readText().then(t => t)
+     ```
+     預期包含 `/api/capabilities`（capabilities endpoint URL）
+   - **驗**：`.terminal-copy-btn` 旁的反饋文字或 icon 變化（可選；依 UI 實作而定）
+
+### 完成後 state
+
+- `#filenameFormat` 在 Settings 仍顯示 `[{num}] {title}`（除非 step 3 還原動作覆蓋）
+- 翻譯開關 `#translateEnabled` 已還原到初始狀態
+- Tag alias `アクション` group 存在於 DB：`GET /api/tag-aliases` 回傳含 `primary_name: "アクション"` 的 group
+- Help curl 按鈕可點擊且剪貼簿含 `/api/capabilities`
+
+### PyWebView 例外
+
+- Settings 頁「最愛資料夾」picker（`selectFavoriteFolder()`）為 PyWebView-only；本 US 不點 picker，只改命名格式與搜尋來源等文字設定，無影響。
+- step 4 整理（scrape）流程若依賴 PyWebView picker 選檔 → 用 Setup 預先放好的 tracked fixture 繞過；不點 `#btnSelectFolder`。
+
+### Regression 偵測點
+
+- 自訂命名格式 API 沒 validate → 儲存時 `alert-error` toast（如含非法字元）；觀察：step 1 save 後 toast class 為 `alert-error`
+- 翻譯開關重載後沒保留 → `saveConfig` 沒把 `translateEnabled` 寫入後端；觀察：step 3 重整後 `#translateEnabled` checked 狀態回到 opposite
+- Tag alias CRUD 後 Showcase filter 沒吃到新 alias → `tag_alias` store reload 沒觸發；用 US4 驗收 `女僕` → `アクション` 的 alias 展開（若兩者 alias 有連結）
+- Help curl 按鈕複製到的 URL 不含 `/api/capabilities` → `copyCurlCommand()` 函數 hardcode 的 URL 錯誤；或剪貼簿 API 在 headless 瀏覽器被 block（需 CDP attach 模式）
+- source badge 切換後重載 `●` 跑掉 → `form.primarySource` 沒從 `/api/config` 正確反序列化
 
 ---
 
 ## Appendix C: Capabilities Smoke（Optional, curl-only）
 
-> _T59c-5 待補完_
+> 純 curl/API 測試，非 browser user story，**不算 milestone 必跑**。
+> CD-59-23：不重複 integration 已覆蓋的單端點 contract；僅作 Agentic AI quick-smoke 清單。
+> A3/A5 有寫檔副作用，需先備 disposable fixture 或確認資料可覆蓋。
+
+### 前置條件
+
+```bash
+# Dev server 已啟動
+source venv/bin/activate && uvicorn web.app:app --host 0.0.0.0 --port 8000
+
+# （A3/A5 用）準備 disposable fixture 番號（確認 DB 內存在或可覆蓋）
+FIXTURE_NUM="SONE-205"  # 換成實際有資料的番號（A1-A5 共用，務必在同一 shell session 執行）
+```
+
+### A1：探索搜尋
+
+```bash
+curl -s "http://localhost:8000/api/search?q=SONE-205&discovery=true" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('title','MISSING'), d.get('actresses','MISSING'), d.get('cover_url','MISSING')[:30])"
+```
+
+**驗收**：`title`、`actresses`、`cover_url` 三欄均非 `MISSING` 且非空字串。
+
+### A2：批量搜尋
+
+```bash
+curl -s -X POST http://localhost:8000/api/batch-search \
+  -H "Content-Type: application/json" \
+  -d '{"numbers":["SONE-205","SSIS-001","IPX-001"]}' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(f'count={len(d.get(\"results\",[]))}')"
+```
+
+**驗收**：回傳 `count=3`（3 筆結果，部分可能為 `not_found` 但結構存在）。
+
+### A3：補完 metadata（寫 DB — 需 disposable fixture）
+
+```bash
+curl -s -X POST http://localhost:8000/api/enrich-single \
+  -H "Content-Type: application/json" \
+  -d "{\"number\":\"$FIXTURE_NUM\",\"mode\":\"fill_missing\"}" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print('updated_fields:', d.get('updated_fields','MISSING'))"
+```
+
+**驗收**：回傳含 `updated_fields` 欄位（可為空 list，表示無需補完）；不回 5xx 錯誤。
+**副作用**：寫入 DB（`$FIXTURE_NUM` 的 metadata 可能被更新）。
+
+### A4：收藏庫查詢
+
+```bash
+curl -s -X POST http://localhost:8000/api/collection/sql \
+  -H "Content-Type: application/json" \
+  -d '{"sql":"SELECT COUNT(*) as cnt FROM videos"}' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print('rows:', d.get('rows','MISSING'))"
+```
+
+**驗收**：回傳 `rows` 非空（如 `[[10]]`）；不回 5xx 或 `{"error":...}` 結構。
+
+### A5：生成 HTML 清單（寫檔 — 需 disposable fixture 或暫目錄）
+
+```bash
+# 先取前 3 個 video id（假設 DB 有資料）
+IDS=$(curl -s "http://localhost:8000/api/collection/sql" \
+  -H "Content-Type: application/json" \
+  -d '{"sql":"SELECT id FROM videos LIMIT 3"}' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(','.join(str(r[0]) for r in d.get('rows',[])))")
+
+curl -s -X POST http://localhost:8000/api/gallery/generate-from-ids \
+  -H "Content-Type: application/json" \
+  -d "{\"ids\":[$IDS],\"output_dir\":\"/tmp/openaver_e2e_smoke\"}" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); html=d.get('html',''); print(f'html_len={len(html)}', 'has_img='+str(\"<img\" in html))"
+```
+
+**驗收**：`html_len > 0` 且 `has_img=True`（回傳 HTML 含封面 `<img>` 標籤）。
+**副作用**：可能寫入 `/tmp/openaver_e2e_smoke/` 目錄；測後可 `rm -rf /tmp/openaver_e2e_smoke`。
 
 ---
 
