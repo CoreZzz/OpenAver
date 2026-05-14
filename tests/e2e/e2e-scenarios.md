@@ -46,7 +46,68 @@ source venv/bin/activate && uvicorn web.app:app --host 0.0.0.0 --port 8000
 
 ## US1: 新手 Onboarding
 
-> _T59c-2 待補完_
+**故事**：用戶第一次開軟體 → tutorial 自動觸發 → 7 步 spotlight 走完 → 完成狀態持久化（加資料夾 / 掃描 / Showcase 依賴 PyWebView picker，不在本 US；由 US2 / US3 涵蓋實際資料流）。
+
+### Setup
+
+- Dev server 已啟動於 `http://localhost:8000`
+- 清 tutorial flag（browser_evaluate）：
+  ```js
+  localStorage.removeItem('openaver_tutorial_completed');
+  ```
+- 確認後端 `config.json` 中 `general.tutorial_completed = false`（或無此 key）；可呼 `GET /api/tutorial-status` 確認 `{"completed": false}`
+- 資料：不需預先資料（測試 onboarding 零資料狀態）
+
+### Steps
+
+1. `browser_navigate` → `http://localhost:8000/scanner`
+2. `browser_wait_for` selector=`#tutorialOverlay.active` timeout=3s
+3. `browser_snapshot` 驗：
+   - `#tutorialOverlay` 存在且有 `.active` class
+   - `#btnSelectFolder` 在頁面上（spotlight 模式靠 CSS box-shadow punch-out 命中此元素）
+   - `#tutorialProgress` 文字含 `1 / 7`
+4. `browser_click` → `#tutorialNext`；`browser_wait_for` `#tutorialProgress` text contains `2 / 7`
+5. `browser_snapshot` 驗 `#btnGenerate` 在 viewport 內（step 2 spotlight 命中產生網頁按鈕）
+6. `browser_click` → `#tutorialNext`；驗進度 `3 / 7`、sidebar `a[href="/scanner"]` 取得 outline（sidebar mode）
+7. `browser_click` → `#tutorialNext`；驗進度 `4 / 7`、sidebar `a[href="/showcase"]` outline
+8. `browser_click` → `#tutorialNext` × 3 → 依序驗 step 5/6/7：
+   - step 5：sidebar `a[href="/search"]` outline、進度 `5 / 7`
+   - step 6：sidebar `a[href="/settings"]` outline、進度 `6 / 7`
+   - step 7：sidebar `a[href="/help"]` outline、進度 `7 / 7`、`#tutorialNext` innerText 變為 `tutorial.done` 翻譯（如「完成」/「Done」）
+9. `browser_click` → `#tutorialNext`（done）；`browser_wait_for` `#tutorialOverlay` 消失或 `:not(.active)`
+10. `browser_evaluate` → `localStorage.getItem('openaver_tutorial_completed')` 預期 `=== 'true'`
+11. **H1 Help verify**：`browser_click` → `#sidebar a[href="/help"]`；`browser_wait_for` URL = `/help` timeout=3s
+    - **驗**：`h2.card-title` 至少 1 個存在且 innerText **不含** `help.` 字串（無 raw i18n key）
+    - **驗**：`.terminal-copy-btn` 可見（curl 複製按鈕 render 正常）
+
+**Tutorial Restart 分支**：
+- `browser_navigate` → `http://localhost:8000/scanner?tutorial=restart`
+- `browser_wait_for` `#tutorialOverlay.active` timeout=2s
+- 驗 `#tutorialProgress` 從 `1 / 7` 開始（重播一律從 step 1）
+
+**重整後不自動觸發驗證**：
+- `browser_navigate` 重新整理 `http://localhost:8000/scanner`
+- `browser_wait_for` 2s（等可能的 auto-trigger）
+- `browser_snapshot` 驗 `#tutorialOverlay` 不存在或 `:not(.active)`
+
+### 完成後 state
+
+- `localStorage.openaver_tutorial_completed === 'true'`
+- `GET /api/tutorial-status` 回 `{"completed": true}`（可選驗）
+- DOM：`#tutorialOverlay` 不存在或無 `.active` class
+- Help 頁所有 `h2.card-title` 無 `help.` 字串
+
+### PyWebView 例外
+
+N/A — tutorial flow 是 browser-only，無需 PyWebView picker。Step 6 sidebar 模式指回 `/scanner` 自身（CD-59-2：避開 `#btnUpdate` 首載隱藏導致 silent skip）。
+
+### Regression 偵測點
+
+- `#btnSelectFolder` 不存在 → tutorial step 1 silent skip → 觀察 `#tutorialProgress` 一開始就是 `2 / 7` 而非 `1 / 7`
+- sidebar mode dim 區域算錯 → overlay 沒覆蓋主內容（視覺：主內容仍亮、sidebar 也被 dim）
+- locale 切換後文案沒抓對 step → i18n raw key 顯示（如 `tutorial.step1_title` 字串出現在 overlay）
+- `tutorial_completed` 沒持久化到後端 → 重整後 tutorial 再次自動觸發（步驟「重整後不自動觸發驗證」失敗）
+- `?tutorial=restart` 不從 step 1 起算 → 進度顯示非 `1 / 7`
 
 ---
 
