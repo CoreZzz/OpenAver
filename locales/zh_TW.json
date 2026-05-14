@@ -725,7 +725,7 @@
     },
     "workflow": {
       "title": "第一次使用？先看這 3 步",
-      "subtitle": "照著左側三個頁面操作，從找資料到展示收藏",
+      "subtitle": "從加入資料夾到補全資料，三步上手",
       "step1_title": "加入片庫資料夾",
       "step1_desc": "在 Scanner 追蹤你的 AV 影片資料夾",
       "step2_title": "產生網頁",
@@ -739,7 +739,7 @@
     },
     "power_user": {
       "title": "想要更多控制？",
-      "intro": "OpenAver 也給控制狂用。你可以一片一片精準刮削、自訂命名規則、管理跨語言別名 — 詳見下方 Search、Settings、Tag 別名管理段落。"
+      "intro": "喜歡自己掌握每個細節？OpenAver 給你完整的進階入口 — 一片一片精準刮削、自訂命名規則、管理跨語言別名，詳見下方 Search、Settings、Tag 別名管理段落。"
     },
     "tag_alias": {
       "title": "Tag 別名管理",
@@ -987,6 +987,6 @@
     "step6_title": "⚙️ 進階 — 自訂規則",
     "step6_content": "命名格式、AI 翻譯、視覺策略都在 Settings 裡<br>玩透了再來",
     "step7_title": "📖 說明手冊",
-    "step7_content": "隨時在網址加 <code>?tutorial=restart</code> 回來重看<br>Help 頁也有功能詳解與 AI agent 指令"
+    "step7_content": "隨時回來重看就好<br>Help 頁也有功能詳解與 AI agent 指令"
   }
 }

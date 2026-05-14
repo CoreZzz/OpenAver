@@ -709,7 +709,7 @@
     },
     "workflow": {
       "title": "First time? Follow these 3 steps",
-      "subtitle": "Use the three pages on the left sidebar, from search to showcase",
+      "subtitle": "From adding your folder to filling metadata — three steps to get started",
       "step1_title": "Add Your Library Folder",
       "step1_desc": "Track your AV video folder in Scanner",
       "step2_title": "Generate Page",
@@ -723,7 +723,7 @@
     },
     "power_user": {
       "title": "Want more control?",
-      "intro": "OpenAver is also built for power users. You can scrape titles one by one with precision, define custom naming rules, and manage cross-language aliases — see the Search, Settings, and Tag Alias sections below."
+      "intro": "Like to control every detail yourself? OpenAver gives you the full set of advanced entry points — scrape titles one by one with precision, define custom naming rules, manage cross-language aliases. See the Search, Settings, and Tag Alias sections below."
     },
     "tag_alias": {
       "title": "Tag Alias Management",
@@ -971,7 +971,7 @@
     "step6_title": "⚙️ Advanced — Custom Rules",
     "step6_content": "Naming format, AI translation, and visual strategy are all in Settings<br>Come back when you're ready to dig deeper",
     "step7_title": "📖 Help Manual",
-    "step7_content": "Add <code>?tutorial=restart</code> to the URL anytime to replay this<br>The Help page also has full feature docs and AI agent commands"
+    "step7_content": "Come back any time to replay this<br>The Help page also has full feature docs and AI agent commands"
   },
   "notif": {
     "title": "Notifications",

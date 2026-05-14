@@ -709,7 +709,7 @@
     },
     "workflow": {
       "title": "初めてですか？3ステップで始めましょう",
-      "subtitle": "左側の3つのページに沿って、検索から展示まで",
+      "subtitle": "フォルダ追加からメタデータ補完まで、3ステップで始める",
       "step1_title": "ライブラリフォルダを追加",
       "step1_desc": "Scanner で AV 動画フォルダをトラッキング",
       "step2_title": "ページを生成",
@@ -723,7 +723,7 @@
     },
     "power_user": {
       "title": "もっと細かく制御したい方へ",
-      "intro": "OpenAver はこだわり派にも対応しています。1本ずつ精密にスクレイプしたり、命名規則をカスタマイズしたり、複数言語の別名を管理したりできます — 下の Search・Settings・Tag エイリアス管理セクションをご覧ください。"
+      "intro": "細部まで自分で押さえたい方へ。OpenAver には本格的な詳細設定が揃っています — 1本ずつ精密にスクレイプ、命名規則のカスタマイズ、複数言語の別名管理など、下の Search・Settings・Tag エイリアス管理セクションをご覧ください。"
     },
     "tag_alias": {
       "title": "Tag エイリアス管理",
@@ -971,7 +971,7 @@
     "step6_title": "⚙️ 上級者向け — カスタムルール",
     "step6_content": "命名形式・AI翻訳・表示設定はすべて Settings にあります<br>慣れてから試してみてください",
     "step7_title": "📖 使い方ガイド",
-    "step7_content": "URLに <code>?tutorial=restart</code> を付けるといつでも再表示できます<br>Help ページには機能詳解と AI agent コマンドもあります"
+    "step7_content": "いつでも戻って見直してください<br>Help ページには機能詳解と AI agent コマンドもあります"
   },
   "notif": {
     "title": "通知",
