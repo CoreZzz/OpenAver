@@ -397,13 +397,13 @@
     },
     "stats": {
       "cached_prefix": "Scanned:",
-      "cached_suffix": "",
+      "cached_suffix": " videos",
       "clear_cache_title": "Clear cache",
       "nfo_prefix": "Incomplete NFO fields:",
-      "nfo_suffix": "",
+      "nfo_suffix": " videos",
       "nfo_update_title": "Fill incomplete NFO fields",
       "jellyfin_prefix": "Jellyfin cover format missing:",
-      "jellyfin_suffix": "",
+      "jellyfin_suffix": " videos",
       "jellyfin_update_title": "Generate Jellyfin poster + fanart",
       "jellyfin_check_btn": "Check Jellyfin Images",
       "jellyfin_check_idle_label": "Jellyfin cover status not checked yet",
@@ -425,7 +425,7 @@
       "missing_both_prefix": "Missing NFO+Cover:",
       "missing_nfo_prefix": "Missing NFO:",
       "missing_cover_prefix": "Missing Cover:",
-      "missing_suffix": "",
+      "missing_suffix": " videos",
       "missing_enrich_idle": "Enrich All",
       "missing_enrich_loading": "Enriching...",
       "missing_enrich_preparing": "Preparing...",
@@ -438,7 +438,7 @@
       "missing_enrich_stream_error": "Enrich error, can resume next time",
       "missing_enrich_interrupted": "Enrich interrupted, can resume next time",
       "missing_resume_label": "Last enrich unfinished, remaining",
-      "missing_resume_suffix": "",
+      "missing_resume_suffix": " videos",
       "missing_resume_btn": "Resume",
       "missing_resume_dismiss": "Dismiss",
       "missing_enrich_confirm_title": "Confirm Large Batch Enrich",
@@ -536,8 +536,7 @@
     },
     "toolbar": {
       "sort_prefix": "Sort",
-      "mode_prefix": "Mode",
-      "per_page_prefix": "Per page"
+      "mode_prefix": "Mode"
     },
     "sort": {
       "date": "Date",
@@ -565,22 +564,19 @@
       "video": "Video Mode"
     },
     "unit": {
-      "videos": "",
+      "videos": "videos",
       "minutes": "min",
       "minutes_abbr": "min",
-      "videos_count": "",
+      "videos_count": " videos",
       "films": " films",
       "actresses": "actresses"
     },
-    "per_page": {
-      "all": "All"
-    },
     "status": {
-      "total_prefix": "",
+      "total_prefix": "Total",
       "total_suffix": "videos",
       "search_prefix": "Search \"",
       "search_middle": "\" — Found",
-      "search_suffix": "",
+      "search_suffix": " videos",
       "search_empty": "No matching films",
       "search_actresses_prefix": "Found ",
       "search_actresses_middle": " actresses for \"",
@@ -662,7 +658,6 @@
         "cancel": "Cancel",
         "confirm": "Remove"
       },
-      "removeConfirm": "Remove {name}?",
       "removeSuccess": "Removed from favorites",
       "empty": "No favorite actresses yet",
       "emptyHint": "Click + in the top right to add one",

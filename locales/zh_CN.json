@@ -536,8 +536,7 @@
     },
     "toolbar": {
       "sort_prefix": "排序",
-      "mode_prefix": "模式",
-      "per_page_prefix": "每页"
+      "mode_prefix": "模式"
     },
     "sort": {
       "date": "日期",
@@ -571,9 +570,6 @@
       "videos_count": " 部",
       "films": "部作品",
       "actresses": "位女优"
-    },
-    "per_page": {
-      "all": "全部"
     },
     "status": {
       "total_prefix": "共",
@@ -662,7 +658,6 @@
         "cancel": "取消",
         "confirm": "确认移除"
       },
-      "removeConfirm": "确认移除 {name}？",
       "removeSuccess": "已从收藏移除",
       "empty": "尚未收藏任何女优",
       "emptyHint": "点击右上角 + 添加收藏",

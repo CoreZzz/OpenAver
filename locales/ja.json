@@ -536,8 +536,7 @@
     },
     "toolbar": {
       "sort_prefix": "並び替え",
-      "mode_prefix": "表示",
-      "per_page_prefix": "件数"
+      "mode_prefix": "表示"
     },
     "sort": {
       "date": "日付",
@@ -572,9 +571,6 @@
       "films": "作品",
       "actresses": "人"
     },
-    "per_page": {
-      "all": "すべて"
-    },
     "status": {
       "total_prefix": "全",
       "total_suffix": "本",
@@ -582,7 +578,7 @@
       "search_middle": "\" の検索結果：",
       "search_suffix": "本",
       "search_empty": "該当する作品はありません",
-      "search_actresses_prefix": "",
+      "search_actresses_prefix": "見つかった ",
       "search_actresses_middle": " 人 \"",
       "search_actresses_suffix": "\""
     },
@@ -662,7 +658,6 @@
         "cancel": "キャンセル",
         "confirm": "削除を確認"
       },
-      "removeConfirm": "{name} を削除しますか？",
       "removeSuccess": "お気に入りから削除しました",
       "empty": "お気に入り女優がいません",
       "emptyHint": "右上の + をクリックして追加してください",
