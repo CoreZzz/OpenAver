@@ -161,9 +161,9 @@ curl http://localhost:<port>/api/capabilities
 |----------|------|------|
 | **CLI** | Claude Code, Codex CLI, Gemini CLI, Aider 等 | 終端機直接 `curl`，所有 CLI agent 皆支援 |
 | **IDE** | Cursor, GitHub Copilot in VS Code, Windsurf, Trae 等 | Agent 模式 / MCP 呼叫本地 API |
-| **桌面 App** | Codex App, Google Antigravity, Claude Cowork, OpenClaw | 不需開發環境，開箱即用 |
+| **桌面 App** | Codex App, Google Antigravity 2.0, Claude Cowork, OpenClaw | 不需開發環境，開箱即用 |
 
-> 💡 **推薦**：**Codex App（對話內嵌）** 或 **Google Antigravity（artifact 面板）**— 兩款桌面 app 均能在對話中向你展示封面，安裝簡單、開箱即用。
+> 💡 **推薦**：**Codex App（對話內嵌）** 或 **Google Antigravity 2.0（artifact 面板）**— 兩款桌面 app 均能在對話中向你展示封面，安裝簡單、開箱即用。
 
 > ⚡ **小模型友善**：capabilities manifest 已針對輕量模型優化，Gemini Flash / GPT mini / Claude Haiku 皆可正確操作所有端點。
 

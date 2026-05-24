@@ -149,10 +149,10 @@ Works with any MCP / function-calling compatible AI tool:
 | Method | Tools | Notes |
 |--------|-------|-------|
 | **CLI** | Claude Code, Codex CLI, Gemini CLI, Aider, etc. | Just `curl` from the terminal — all CLI agents supported |
-| **IDE** | Cursor, GitHub Copilot in VS Code, Windsurf, Trae, Google Antigravity, etc. | Agent mode / MCP to call local API |
-| **Desktop App** | Codex App, Claude Cowork, OpenClaw | No dev environment needed, works out of the box |
+| **IDE** | Cursor, GitHub Copilot in VS Code, Windsurf, Trae, etc. | Agent mode / MCP to call local API |
+| **Desktop App** | Codex App, Google Antigravity 2.0, Claude Cowork, OpenClaw | No dev environment needed, works out of the box |
 
-> 💡 **Recommended**: **OpenAI Codex App** (Win/Mac, free tier available) — the only AI tool that renders cover images directly in the conversation. Easy to install, works out of the box.
+> 💡 **Recommended**: **Codex App (inline chat)** or **Google Antigravity 2.0 (artifact panel)** — both desktop apps display covers directly in your conversation flow. Easy to install, works out of the box.
 
 > ⚡ **Small-model friendly**: The capabilities manifest is optimized for lightweight models — Gemini Flash / GPT-5.4 mini / Claude Haiku can all operate every endpoint correctly.
 
