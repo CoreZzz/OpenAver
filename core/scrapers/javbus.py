@@ -97,7 +97,7 @@ class JavBusScraper(BaseScraper):
 
         try:
             resp = self._session.get(url, timeout=self.config.timeout)
-        except requests.Timeout:
+        except (requests.Timeout, requests.ConnectionError):
             raise TimeoutError(f"Request timed out for {number}")
 
         if resp.status_code != 200:
@@ -305,7 +305,7 @@ class JavBusScraper(BaseScraper):
         url = self._build_search_url(keyword, page, search_type)
         try:
             resp = self._session.get(url, timeout=self.config.timeout)
-        except requests.Timeout:
+        except (requests.Timeout, requests.ConnectionError):
             raise TimeoutError(f"Search request timed out for keyword: {keyword}")
         if resp.status_code != 200:
             return []
@@ -319,7 +319,7 @@ class JavBusScraper(BaseScraper):
 
         try:
             resp = self._session.get(url, timeout=self.config.timeout)
-        except requests.Timeout:
+        except (requests.Timeout, requests.ConnectionError):
             raise TimeoutError(f"Request timed out for {id_str}")
 
         if resp.status_code != 200:
@@ -352,6 +352,6 @@ class JavBusScraper(BaseScraper):
                 video = self.search(num_id)
                 if video:
                     results.append(video)
-            except (ValueError, TimeoutError):
+            except (ValueError, TimeoutError, requests.ConnectionError):
                 continue
         return results
