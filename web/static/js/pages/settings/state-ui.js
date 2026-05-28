@@ -1,6 +1,12 @@
+// 61b-3: 合法 tab id ↔ URL hash fragment（CD-61-1，防 typo）。
+// 非法 hash / localStorage 值一律 fallback 預設 'display'。
+const SETTINGS_TAB_IDS = ['display', 'scraping', 'sources', 'organize', 'translate', 'advanced'];
+
 export function stateUI() {
     return {
         // ===== UI State =====
+        // 61b-3: 當前 tab（預設第一個 tab；初始化由 _initActiveTab 處理，禁加 init()）
+        activeTab: 'display',
         newSuffixInput: '',
         showPathHelp: false,
         showSampleImagesHelp: false,
@@ -80,6 +86,51 @@ export function stateUI() {
         dirtyCheckCancel() {
             this.pendingNavigationUrl = '';
             this.dirtyCheckModalOpen = false;
+        },
+
+        // ─── 61b-3: activeTab / URL hash / localStorage ───────────────────
+        // ⚠️ 具名 init helper（禁加 stateUI.init() — 會覆蓋 stateConfig.init）。
+        // 由 state-config.js init() 末尾呼叫，比照 _initB1 慣例。
+        _initActiveTab() {
+            // 優先序：URL hash > localStorage('settings_active_tab') > 'display'
+            let resolved = 'display';
+
+            // 1) URL hash（去掉前導 #）
+            const hashId = (location.hash || '').replace(/^#/, '');
+            if (SETTINGS_TAB_IDS.includes(hashId)) {
+                resolved = hashId;
+            } else {
+                // 2) localStorage（隱私模式 / storage 不可用會拋，包 try-catch）
+                try {
+                    const stored = localStorage.getItem('settings_active_tab');
+                    if (SETTINGS_TAB_IDS.includes(stored)) {
+                        resolved = stored;
+                    }
+                } catch (e) {
+                    console.warn('[settings] read settings_active_tab failed:', e);
+                }
+            }
+
+            this.activeTab = resolved;
+
+            // tab 變更 → 記憶 + 同步 URL（replaceState，不堆瀏覽歷史）
+            this.$watch('activeTab', (val) => {
+                if (!SETTINGS_TAB_IDS.includes(val)) return;
+                try {
+                    localStorage.setItem('settings_active_tab', val);
+                } catch (e) {
+                    console.warn('[settings] write settings_active_tab failed:', e);
+                }
+                history.replaceState(null, '', '#' + val);
+            });
+
+            // 外部深連結（如 /settings#translate）：監聽 hashchange
+            window.addEventListener('hashchange', () => {
+                const id = (location.hash || '').replace(/^#/, '');
+                if (SETTINGS_TAB_IDS.includes(id) && id !== this.activeTab) {
+                    this.activeTab = id;
+                }
+            });
         },
 
         // ─── B1: Scanner directory link ───────────────────────────────────

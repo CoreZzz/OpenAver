@@ -3678,6 +3678,15 @@ class TestSettingsESMGuard:
         content = self._read("web/static/js/pages/settings/state-ui.js")
         assert "export function stateUI" in content
 
+    def test_state_ui_has_active_tab_contract(self):
+        """61b-3：state-ui.js 含 activeTab 狀態 + settings_active_tab localStorage key
+        （跨檔 Alpine state contract，eslint 無法表達 — plan-61.md:561 授權）"""
+        content = self._read("web/static/js/pages/settings/state-ui.js")
+        assert "activeTab" in content, \
+            "state-ui.js 缺少 activeTab 狀態（61b-3 tab state contract）"
+        assert "settings_active_tab" in content, \
+            "state-ui.js 缺少 settings_active_tab localStorage key（CD-61-12）"
+
     def test_main_js_exists_and_has_alpine_init(self):
         content = self._read("web/static/js/pages/settings/main.js")
         assert "alpine:init" in content

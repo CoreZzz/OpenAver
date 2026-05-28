@@ -224,6 +224,9 @@ export function stateConfig() {
                     }
                 });
             }
+
+            // 61b-3: activeTab / URL hash / localStorage（活在 stateUI，禁加 stateUI.init）
+            if (typeof this._initActiveTab === 'function') this._initActiveTab();
         },
 
         // ===== Methods =====
