@@ -59,6 +59,7 @@ _ALLOWED_IMAGE_ROOT_DOMAINS = {
     "avsox.monster",
     "avsox.website",
     "javten.com",
+    "fc2.com",  # FC2 圖床（contents-thumbnail2 / live-storage / storage<NNN>.contents 數字子域）
     "jdbstatic.com",  # JavDB CDN root (c0/c1/c2 numbered subdomains)
 }
 # SSRF allowlist — exact match，不允子域（CD-60-1：CDN / 女優照片固定 host 嚴格匹配）
@@ -75,6 +76,7 @@ _ALLOWED_IMAGE_EXACT_HOSTS = {
     "graphis.ne.jp",
     "www.minnano-av.com",
     "minnano-av.com",
+    "file.netcdn.space",  # AVSOX 圖床（caribbean / 1pondo / heyzo 封面 CDN）
 }
 
 

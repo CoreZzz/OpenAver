@@ -1006,11 +1006,61 @@ class TestProxyImageSSRF:
         assert response.status_code == 200
         mock_get.assert_called_once()
 
+    # ---- 無碼來源圖床 allow cases (FC2 / AVSOX，實機驗證真實 host) ----
+
+    def test_allow_fc2_contents_thumbnail_subdomain(self, client):
+        """FC2 封面/劇照 host contents-thumbnail2.fc2.com（fc2.com root domain）應通過 → 200
+
+        實機驗證（FC2-PPV-4908730）：scraper 取 data-fancybox gallery href，
+        cover + samples 皆在 contents-thumbnail2.fc2.com。原 allowlist 無 fc2.com → 403。
+        """
+        url = 'https://contents-thumbnail2.fc2.com/w1280/storage201000.contents.fc2.com/file/382/x.jpg'
+        with patch('web.routers.search.requests.get', return_value=self._make_mock_response()) as mock_get:
+            response = client.get('/api/proxy-image', params={'url': url})
+        assert response.status_code == 200
+        mock_get.assert_called_once()
+
+    def test_allow_fc2_storage_numbered_subdomain(self, client):
+        """storage<NNN>.contents.fc2.com（FC2 og:image 數字子域，fc2.com root domain）應通過 → 200"""
+        url = 'https://storage201000.contents.fc2.com/file/382/38137888/x.jpg'
+        with patch('web.routers.search.requests.get', return_value=self._make_mock_response()) as mock_get:
+            response = client.get('/api/proxy-image', params={'url': url})
+        assert response.status_code == 200
+        mock_get.assert_called_once()
+
+    def test_allow_avsox_netcdn_exact_host(self, client):
+        """AVSOX 封面 CDN file.netcdn.space（exact host）應通過 → 200
+
+        實機驗證（032620-001）：scraper 取 a.bigImage href，cover 在 file.netcdn.space。
+        原 allowlist 無此 host → 403。
+        """
+        url = 'https://file.netcdn.space/storage/caribbeancom/moviepages/032620-001/images/l_l.jpg'
+        with patch('web.routers.search.requests.get', return_value=self._make_mock_response()) as mock_get:
+            response = client.get('/api/proxy-image', params={'url': url})
+        assert response.status_code == 200
+        mock_get.assert_called_once()
+
     # ---- Exact-host subdomain blocked (1) ----
 
     def test_evil_jsdelivr_subdomain_blocked(self, client):
         """evil.jsdelivr.net 不在 exact set，不允子域 → 403"""
         url = 'https://evil.jsdelivr.net/malicious.js'
+        with patch('web.routers.search.requests.get') as mock_get:
+            response = client.get('/api/proxy-image', params={'url': url})
+        assert response.status_code == 403
+        mock_get.assert_not_called()
+
+    def test_fc2_lookalike_domain_blocked(self, client):
+        """fc2.com.evil.com 非 fc2.com 子域（endswith '.fc2.com' 不符）→ 403"""
+        url = 'https://fc2.com.evil.com/malicious.jpg'
+        with patch('web.routers.search.requests.get') as mock_get:
+            response = client.get('/api/proxy-image', params={'url': url})
+        assert response.status_code == 403
+        mock_get.assert_not_called()
+
+    def test_netcdn_lookalike_host_blocked(self, client):
+        """netcdn.space.evil.com / 其他 netcdn.space 子域不在 exact set → 403"""
+        url = 'https://netcdn.space.evil.com/malicious.jpg'
         with patch('web.routers.search.requests.get') as mock_get:
             response = client.get('/api/proxy-image', params={'url': url})
         assert response.status_code == 403
