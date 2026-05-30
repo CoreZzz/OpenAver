@@ -92,6 +92,15 @@ export function rescrapeState() {
         async rescrapeWithSource(sourceId) {
             if (this.rescrapeLoadingSource !== null) return;          // 連點防護
             if (!this.rescrapeNumber.trim()) { this.rescrapeNotFound = true; return; }
+            // Search 入口（62c-1）：無預覽卡，繞過 /api/rescrape/preview，直接走 B1 advancedSearch
+            // 整包贏（GET /api/search?...&source=），結果進正常結果區，彈窗關閉（spec US5）。
+            // 番號回寫 searchQuery：讓彈窗內改番號生效（advancedSearch 讀 this.searchQuery）。
+            if (this.rescrapeEntryPoint === 'search') {
+                this.searchQuery = this.rescrapeNumber.trim();
+                this.closeRescrape();
+                await this.advancedSearch(sourceId);  // 'auto' 直接傳給 /api/search（後端 merger）
+                return;
+            }
             this.rescrapeNotFound = false;
             this.rescrapeLoadingSource = sourceId;
             try {
@@ -104,16 +113,8 @@ export function rescrapeState() {
                     }),
                 });
                 const data = await resp.json();
-                if (this.rescrapeEntryPoint === 'search') {
-                    // Search 入口：62c-1 接結果區；本 task 先 close（成功）/ 標 not-found（失敗）
-                    if (data && data.success) {
-                        this.closeRescrape();
-                    } else {
-                        this.rescrapeNotFound = true;
-                    }
-                    return;
-                }
                 // Showcase（lightbox / enrich）：找到 → 換頁 preview；找不到 → 留 pick
+                // （Search 入口已在函式開頭提早分流到 advancedSearch，不走到這裡）
                 if (data && data.success) {
                     this.rescrapePreview = { ...data, sourceName: this._resolveSourceName(sourceId) };
                     this._rescrapeCommitSource = sourceId;

@@ -358,4 +358,26 @@ export default [
       ],
     },
   },
+
+  // Group 7 (62c-1): shared/state-rescrape.js — search 分支禁 fallbackSearch（CD-62-11 負向守衛）
+  // search 入口整包贏必須走 advancedSearch(source)（帶 source）；fallbackSearch（search-flow.js）
+  // 簽名 (query, savedRequestId) 無 source，誤接會丟失「指定來源整包覆寫」語義（US5）。
+  // 此 group 最後 match state-rescrape.js（supersedes Group 6），故重述繼承的共用 selector。
+  {
+    files: ["web/static/js/shared/state-rescrape.js"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        SEL_WINDOW_CONFIRM,
+        SEL_BREATHING_MANAGER_NEW,
+        SEL_STARSETTLE_LITERAL,
+        {
+          selector: "CallExpression[callee.property.name='fallbackSearch']",
+          message:
+            "62c-1：state-rescrape.js search 分支禁呼叫 fallbackSearch（無 source 參數）。" +
+            "進階搜尋整包贏須走 this.advancedSearch(source)（帶 source 整包覆寫，spec US5）。",
+        },
+      ],
+    },
+  },
 ];

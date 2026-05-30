@@ -8075,3 +8075,152 @@ class TestRescrapeEntryGuard:
             "state-rescrape.js missing rescrapeEnabled() method（決策 #1）"
         assert "window.__ADVANCED_SEARCH__" in src, \
             "rescrapeEnabled() 必須讀 window.__ADVANCED_SEARCH__.enabled"
+
+
+class TestSearchRescrapeEntryGuard:
+    """62c-1: 守衛 Search 進階搜尋入口改用 62a 共用重刮彈窗 contract。
+
+    B1 radio picker（advancedPickerModal）已移除，改 include _rescrape_modal.html；
+    search bar 送出鈕長壓 → openRescrape(null,'search') 開共用彈窗上半部（番號預填 searchQuery）；
+    state-rescrape.js search 分支成功走 advancedSearch(source) 整包贏（不打 preview、不 fallbackSearch）。
+
+    Opus 裁示（2026-05-30）：62c-1 維持 B1 advancedLongPress* 按鈕 wiring + advancedLongPressSubmitGuard
+    （旗標一致、US8 受保護）；不接共用 longPressState（留 62c-2）。對齊 TestRescrapeStateGuard /
+    TestRescrapeEntryGuard pattern（element-bound regex，避免「字串存在性」假測試）。
+    """
+
+    SHARED_DIR = Path(__file__).parent.parent.parent / "web" / "static" / "js" / "shared"
+    SEARCH_DIR = Path(__file__).parent.parent.parent / "web" / "static" / "js" / "pages" / "search"
+    STATE_RESCRAPE_JS = SHARED_DIR / "state-rescrape.js"
+    SEARCH_MAIN_JS = SEARCH_DIR / "main.js"
+    ADVANCED_PICKER_JS = SEARCH_DIR / "state" / "advanced-picker.js"
+
+    def _html(self):
+        return SEARCH_HTML.read_text(encoding="utf-8")
+
+    def _main(self):
+        return self.SEARCH_MAIN_JS.read_text(encoding="utf-8")
+
+    def _rescrape(self):
+        return self.STATE_RESCRAPE_JS.read_text(encoding="utf-8")
+
+    def _picker(self):
+        return self.ADVANCED_PICKER_JS.read_text(encoding="utf-8")
+
+    def _submit_btn(self, html):
+        """擷取 search bar 送出鈕 #btnSubmit 的完整 <button>...</button> 區塊。"""
+        m = re.search(
+            r'<button\b(?:(?!</button>).)*?\bid="btnSubmit"(?:(?!</button>).)*?</button>',
+            html, re.DOTALL,
+        )
+        assert m, "search.html #btnSubmit button 區塊不存在"
+        return m.group(0)
+
+    # ── (a) search main.js import + mergeState（只 rescrapeState，不含 longPressState）──
+
+    def test_search_main_imports_rescrape_state(self):
+        """search main.js 必須 import rescrapeState 並插入 mergeState 鏈（descriptor-preserving）。"""
+        src = self._main()
+        assert "from '@/shared/state-rescrape.js'" in src, \
+            "search main.js missing: import { rescrapeState } from '@/shared/state-rescrape.js'"
+        assert re.search(r"rescrapeState\s*\(", src), \
+            "search main.js mergeState chain missing: rescrapeState()"
+
+    def test_search_main_no_long_press_state_yet(self):
+        """裁示 1：62c-1 不 import longPressState（search 按鈕仍用 B1 timer，留 62c-2）。"""
+        src = self._main()
+        assert "from '@/shared/long-press.js'" not in src, \
+            "62c-1 不應 import longPressState（留 62c-2，避免旗標不一致 US8 回歸）"
+
+    # ── (b) search.html include 共用彈窗 + 長壓 wiring（B1 旗標保留）──
+
+    def test_search_html_includes_rescrape_modal(self):
+        """search.html 必須 include _rescrape_modal.html（取代 B1 picker DOM）。"""
+        html = self._html()
+        assert "{% include '_rescrape_modal.html' %}" in html, \
+            "62c-1 違規：search.html 未 include _rescrape_modal.html"
+
+    def test_search_html_no_advanced_picker_modal(self):
+        """負向：B1 advancedPickerModal DOM 整塊必須移除（CD-62-11，HTML 結構守衛）。"""
+        html = self._html()
+        for dead in ("advancedPickerModal", "advancedPickerConfirm",
+                     "advancedPickerSelected", "advancedPickerClose",
+                     "advancedPickerBuiltinSources", "advancedPickerMetatubeSources"):
+            assert dead not in html, \
+                f"62c-1 違規：search.html 仍殘留 B1 picker 引用 {dead}（應隨 DOM 移除）"
+
+    def test_submit_btn_longpress_opens_rescrape_search(self):
+        """#btnSubmit 長壓 mousedown 仍接 B1 advancedLongPressStart（fire body 改開共用彈窗）。"""
+        tag = self._submit_btn(self._html())
+        m = re.search(r'@mousedown="([^"]*)"', tag)
+        assert m, "#btnSubmit 缺 @mousedown 長壓 wiring"
+        assert "advancedLongPressStart()" in m.group(1), \
+            f"#btnSubmit @mousedown 必須接 advancedLongPressStart()（裁示 1 保留 B1 wiring），實際: {m.group(1)!r}"
+
+    def test_submit_btn_click_guard_preserved(self):
+        """#btnSubmit @click 仍走 advancedLongPressClickGuard（CD-62-9 #2，US8 不連帶送出）。"""
+        tag = self._submit_btn(self._html())
+        m = re.search(r'@click="([^"]*)"', tag)
+        assert m, "#btnSubmit 缺 @click guard"
+        assert "advancedLongPressClickGuard($event)" in m.group(1), \
+            f"#btnSubmit @click 必須 advancedLongPressClickGuard($event)，實際: {m.group(1)!r}"
+
+    def test_form_submit_guard_preserved(self):
+        """form-level submit guard 必須保留 advancedLongPressSubmitGuard()（CD-62-9 #2，US8 硬約束）。"""
+        html = self._html()
+        m = re.search(r'<form\b[^>]*\bid="searchForm"[^>]*@submit\.prevent="([^"]*)"', html)
+        assert m, "search.html #searchForm @submit.prevent guard 不存在"
+        assert "advancedLongPressSubmitGuard()" in m.group(1), \
+            f"form submit guard 必須含 advancedLongPressSubmitGuard()（US8 保留），實際: {m.group(1)!r}"
+
+    # ── advanced-picker.js fire body 改動 ──
+
+    def test_longpress_fire_opens_rescrape_search(self):
+        """advancedLongPressStart 的 setTimeout fire body 必須開共用彈窗 openRescrape(null, 'search')。"""
+        src = self._picker()
+        assert re.search(r"openRescrape\(\s*null\s*,\s*'search'\s*\)", src), \
+            "advancedLongPressStart fire body 必須呼叫 openRescrape(null, 'search')（取代 B1 picker 開窗）"
+        # 旗標保留：仍設 _advancedLongPressFired = true（US8 攔截同一次 click/submit）
+        assert "_advancedLongPressFired = true" in src, \
+            "advancedLongPressStart 必須保留 _advancedLongPressFired = true（US8 旗標一致）"
+        # 番號預填 searchQuery（US5-a）
+        assert "this.searchQuery" in src, \
+            "advancedLongPressStart fire body 必須以 searchQuery 預填 rescrapeNumber（US5-a）"
+
+    def test_picker_submit_guard_retained(self):
+        """advancedLongPressSubmitGuard 本體必須保留在 advanced-picker.js（form-level，showcase helper 不含）。"""
+        src = self._picker()
+        assert re.search(r"advancedLongPressSubmitGuard\s*\(", src), \
+            "advanced-picker.js 必須保留 advancedLongPressSubmitGuard（裁示 1 / CD-62-9 #2）"
+
+    def test_picker_dead_methods_removed(self):
+        """負向：B1 picker-modal 專屬 method（advancedPicker* / _advancedSortedSources）已移除。"""
+        src = self._picker()
+        for dead in ("advancedPickerOpen", "advancedPickerSelected", "advancedPickerClose",
+                     "advancedPickerConfirm", "advancedPickerBuiltinSources",
+                     "advancedPickerMetatubeSources", "_advancedSortedSources"):
+            assert dead not in src, \
+                f"62c-1 違規：advanced-picker.js 仍殘留死碼 {dead}（B1 picker DOM 已移除，應一併清除）"
+
+    # ── (c) state-rescrape.js search 分支走 advancedSearch（不 preview、不 fallbackSearch）──
+
+    def test_search_branch_uses_advanced_search(self):
+        """state-rescrape.js search 分支成功路徑必須走 advancedSearch(（正向斷言新行為）。"""
+        src = self._rescrape()
+        # 提早分流：rescrapeEntryPoint === 'search' → advancedSearch
+        assert "advancedSearch(" in src, \
+            "state-rescrape.js search 分支必須走 this.advancedSearch(source)（整包贏進結果區）"
+        assert re.search(r"rescrapeEntryPoint\s*===\s*'search'", src), \
+            "state-rescrape.js 必須以 rescrapeEntryPoint === 'search' 分流"
+
+    def test_search_branch_no_fallback_search(self):
+        """負向（亦由 eslint Group 7 守）：search 分支禁 fallbackSearch（無 source 參數，US5 整包贏需 source）。"""
+        src = self._rescrape()
+        assert "fallbackSearch" not in src, \
+            "state-rescrape.js 禁出現 fallbackSearch（誤接 search-flow.js 無 source 版本，違反 US5）"
+
+    def test_bootstrap_include_not_regressed(self):
+        """不回歸 62a-0：search.html 仍 include _advanced_search_bootstrap.html（SSR 注入）。"""
+        html = self._html()
+        assert "{% include '_advanced_search_bootstrap.html' %}" in html, \
+            "62a-0 回歸：search.html 必須保留 _advanced_search_bootstrap.html include"
