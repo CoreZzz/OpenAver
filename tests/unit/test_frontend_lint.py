@@ -7691,6 +7691,85 @@ class TestRescrapeModalGuard:
             f"62a-2 違規：rescrape-modal.css border-radius 用 px 字面 {radius_px}（應用 --fluent-radius-* token）"
         )
 
+    # ── Showcase Advanced Rescrape layering fix (CSS z-index + glass backdrop) ──
+    # Bug: rescrape modal opened from the lightbox rendered UNDER it because DaisyUI
+    # gives .modal z-index 999 < .showcase-lightbox 1000. Fix lifts .rescrape-dialog
+    # to 1600 and adds the real class-open glass backdrop (::backdrop never fires for
+    # the Alpine class-open pattern). These guards encode the cross-file z-index
+    # contract (stylelint can't express "A > B") + token-only backdrop.
+
+    def _theme_css(self):
+        return THEME_CSS.read_text(encoding="utf-8")
+
+    def _showcase_css(self):
+        return SHOWCASE_CSS.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _zindex_of(css, selector):
+        """Extract the int z-index declared on `selector { ... z-index: N }`.
+        selector is a literal substring of the rule head (regex-escaped)."""
+        m = re.search(
+            re.escape(selector) + r"\s*\{[^}]*?z-index:\s*(\d+)",
+            css, re.DOTALL,
+        )
+        assert m, f"無法在 CSS 找到 {selector!r} 的 z-index 宣告"
+        return int(m.group(1))
+
+    def test_rescrape_dialog_zindex_above_lightbox_stack_below_toast(self):
+        """.rescrape-dialog z-index 必須 > showcase-lightbox(1000)/similar-stage(1501)
+        且 < fluent-toast-container(2000)。實際數字用 regex 抽出，未來誰調低就紅。"""
+        rescrape_z = self._zindex_of(self._modal_css(), ".rescrape-dialog.modal")
+        showcase_css = self._showcase_css()
+        lightbox_z = self._zindex_of(showcase_css, ".showcase-lightbox")
+        similar_z = self._zindex_of(showcase_css, ".similar-stage")
+        toast_z = self._zindex_of(self._theme_css(), ".fluent-toast-container")
+
+        assert rescrape_z > lightbox_z, (
+            f"62-showcase 違規：rescrape z-index {rescrape_z} 未高於 "
+            f".showcase-lightbox {lightbox_z}（會渲染在 lightbox 下方）"
+        )
+        assert rescrape_z > similar_z, (
+            f"62-showcase 違規：rescrape z-index {rescrape_z} 未高於 "
+            f".similar-stage {similar_z}"
+        )
+        assert rescrape_z < toast_z, (
+            f"62-showcase 違規：rescrape z-index {rescrape_z} 未低於 "
+            f".fluent-toast-container {toast_z}（成功 toast 會被彈窗蓋住）"
+        )
+
+    def test_fluent_modal_class_open_backdrop_uses_tokens(self):
+        """.fluent-modal.modal-open glass backdrop：12px blur 走 --fluent-blur-light token
+        （非硬編碼 blur(Npx)）、dim 走 --overlay-modal、且有 -webkit- 配對 fallback。
+        ::backdrop 在 class-open 模式不觸發，故真正生效的是這條 unlayered 規則。"""
+        css = self._theme_css()
+        m = re.search(
+            r"\.fluent-modal\.modal-open\s*\{([^}]*)\}", css, re.DOTALL,
+        )
+        assert m, (
+            "62-showcase 違規：theme.css 缺少 .fluent-modal.modal-open "
+            "class-open 玻璃 backdrop 規則"
+        )
+        rule = m.group(1)
+        assert "blur(var(--fluent-blur-light))" in rule, (
+            "62-showcase 違規：backdrop blur 未走 --fluent-blur-light token"
+        )
+        # 禁止硬編碼 blur(Npx)（token only，ui-conventions §2）
+        assert not re.search(r"blur\(\s*\d+px", rule), (
+            "62-showcase 違規：backdrop 含硬編碼 blur(Npx)，應用 --fluent-blur-light token"
+        )
+        assert "var(--overlay-modal)" in rule, (
+            "62-showcase 違規：backdrop dim 未走 --overlay-modal token"
+        )
+        # Safari/iOS fallback：-webkit- 配對（gotchas §backdrop-filter）
+        assert "-webkit-backdrop-filter: blur(var(--fluent-blur-light))" in rule, (
+            "62-showcase 違規：backdrop 缺少 -webkit-backdrop-filter 配對（Safari/iOS）"
+        )
+        # painted on the dialog itself（保留 @click.self 關窗）—— 不得引入攔截點擊的 child
+        assert "background: var(--overlay-modal)" in rule, (
+            "62-showcase 違規：dim 應 paint 在 dialog 本體（background），"
+            "不可改用攔截點擊的 child div（會破壞 @click.self 關窗）"
+        )
+
     def test_zh_tw_has_rescrape_keys(self):
         """zh_TW.json 含 showcase.rescrape.* key。"""
         data = self._zh_tw()
