@@ -4,8 +4,8 @@
  * 通用 700ms 長壓 timer + click guard，供多入口共用：
  *   - Showcase grid 缺卡 enrich-btn（tap=enrich / 長壓=進階重刮）
  *   - Showcase lightbox cover-actions 🔍 enrich-btn（同上）
- *   - （62c-2）Search picker 入口統一接通（advanced-picker.js 的 timer/clickGuard 改接此 helper；
- *      search 特有的 form submit guard `advancedLongPressSubmitGuard` 留在 advanced-picker.js）
+ *   - （62c-2）Search 送出鈕 #btnSubmit 統一接通（advanced-picker.js 的 timer/clickGuard 已移除，改接此 helper；
+ *      form submit guard 一併移除 — US8 由 longPressClickGuard 的 preventDefault 取消 submit 按鈕隱式 form 送出保護）
  *
  * factory mixin，透過 longPressState.call(this) 接入 main.js mergeState（descriptor-preserving）。
  * method 非 getter（規避 Alpine reactivity 凍結；CD-62-14 #0）。

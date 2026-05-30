@@ -41,8 +41,8 @@ export function rescrapeState() {
         _rescrapeCommitSource: null,       // 進 preview 用的 source（commit 沿用，auto→null 映射前原值）
 
         /**
-         * 進階重刮入口 gate（62b-1，決策 #1）。三入口（⚙ / grid 長壓 / lightbox 🔍 長壓）共用，
-         * 守衛可斷言、與 advancedSearchEnabled() 命名平行，避免 template 散落 window 讀取。
+         * 進階重刮入口 gate（62b-1，決策 #1）。各入口（⚙ / grid 長壓 / lightbox 🔍 長壓 / search 送出鈕長壓）共用，
+         * 守衛可斷言、避免 template 散落 window 讀取（62c-2 起 search 長壓 enabledFn 亦統一用此）。
          * method 非 getter（規避 Alpine reactivity 凍結；CD-62-14 #0）。
          */
         rescrapeEnabled() {

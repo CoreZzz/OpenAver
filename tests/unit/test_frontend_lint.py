@@ -8084,9 +8084,11 @@ class TestSearchRescrapeEntryGuard:
     search bar 送出鈕長壓 → openRescrape(null,'search') 開共用彈窗上半部（番號預填 searchQuery）；
     state-rescrape.js search 分支成功走 advancedSearch(source) 整包贏（不打 preview、不 fallbackSearch）。
 
-    Opus 裁示（2026-05-30）：62c-1 維持 B1 advancedLongPress* 按鈕 wiring + advancedLongPressSubmitGuard
-    （旗標一致、US8 受保護）；不接共用 longPressState（留 62c-2）。對齊 TestRescrapeStateGuard /
-    TestRescrapeEntryGuard pattern（element-bound regex，避免「字串存在性」假測試）。
+    62c-2：#btnSubmit 六事件 + click guard 改接共用 shared/long-press.js（longPressState），
+    main.js import + mergeState longPressState；form submit guard（advancedLongPressSubmitGuard）已移除，
+    form 直接走 doSearch()。US8（長壓開窗不連帶送出一般搜尋）由 longPressClickGuard 的 preventDefault
+    取消 submit 按鈕隱式 form 送出保護（方案 A）。advanced-picker.js 的整套 advancedLongPress* mixin 已移除。
+    對齊 TestRescrapeStateGuard / TestRescrapeEntryGuard pattern（element-bound regex，避免假測試）。
     """
 
     SHARED_DIR = Path(__file__).parent.parent.parent / "web" / "static" / "js" / "shared"
@@ -8116,7 +8118,7 @@ class TestSearchRescrapeEntryGuard:
         assert m, "search.html #btnSubmit button 區塊不存在"
         return m.group(0)
 
-    # ── (a) search main.js import + mergeState（只 rescrapeState，不含 longPressState）──
+    # ── (a) search main.js import + mergeState（rescrapeState + longPressState）──
 
     def test_search_main_imports_rescrape_state(self):
         """search main.js 必須 import rescrapeState 並插入 mergeState 鏈（descriptor-preserving）。"""
@@ -8126,13 +8128,19 @@ class TestSearchRescrapeEntryGuard:
         assert re.search(r"rescrapeState\s*\(", src), \
             "search main.js mergeState chain missing: rescrapeState()"
 
-    def test_search_main_no_long_press_state_yet(self):
-        """裁示 1：62c-1 不 import longPressState（search 按鈕仍用 B1 timer，留 62c-2）。"""
-        src = self._main()
-        assert "from '@/shared/long-press.js'" not in src, \
-            "62c-1 不應 import longPressState（留 62c-2，避免旗標不一致 US8 回歸）"
+    def test_search_main_imports_long_press_state(self):
+        """62c-2（翻轉）：search main.js 必須 import longPressState + 併入 mergeState 鏈（descriptor-preserving）。
 
-    # ── (b) search.html include 共用彈窗 + 長壓 wiring（B1 旗標保留）──
+        62c-1 原斷言「不得 import longPressState」（留 62c-2）；本 task 兌現 — #btnSubmit 改接共用
+        shared/long-press.js，故 main.js 必須 import 並 merge longPressState（CD-62-14 descriptor merge，禁 spread）。
+        """
+        src = self._main()
+        assert "from '@/shared/long-press.js'" in src, \
+            "62c-2：search main.js 必須 import { longPressState } from '@/shared/long-press.js'"
+        assert re.search(r"longPressState\s*\(", src), \
+            "62c-2：search main.js mergeState chain missing: longPressState()"
+
+    # ── (b) search.html include 共用彈窗 + 長壓 wiring（共用 longPressState）──
 
     def test_search_html_includes_rescrape_modal(self):
         """search.html 必須 include _rescrape_modal.html（取代 B1 picker DOM）。"""
@@ -8150,48 +8158,89 @@ class TestSearchRescrapeEntryGuard:
                 f"62c-1 違規：search.html 仍殘留 B1 picker 引用 {dead}（應隨 DOM 移除）"
 
     def test_submit_btn_longpress_opens_rescrape_search(self):
-        """#btnSubmit 長壓 mousedown 仍接 B1 advancedLongPressStart（fire body 改開共用彈窗）。"""
+        """62c-2（翻轉）：#btnSubmit 長壓 mousedown 改接共用 longPressStart，fire callback 開共用彈窗 + 番號預填。
+
+        62c-1 原接 advancedLongPressStart()；62c-2 改接 shared helper longPressStart(cb, enabledFn)，
+        cb 以 template arrow 傳入（openRescrape(null,'search') + rescrapeNumber 預填 searchQuery，US5-a），
+        enabledFn 為 rescrapeEnabled()（toggle OFF gate）。
+        """
         tag = self._submit_btn(self._html())
         m = re.search(r'@mousedown="([^"]*)"', tag)
         assert m, "#btnSubmit 缺 @mousedown 長壓 wiring"
-        assert "advancedLongPressStart()" in m.group(1), \
-            f"#btnSubmit @mousedown 必須接 advancedLongPressStart()（裁示 1 保留 B1 wiring），實際: {m.group(1)!r}"
+        wiring = m.group(1)
+        assert "longPressStart(" in wiring, \
+            f"#btnSubmit @mousedown 必須接共用 longPressStart(...)（62c-2 rewire），實際: {wiring!r}"
+        assert re.search(r"openRescrape\(\s*null\s*,\s*'search'\s*\)", wiring), \
+            f"#btnSubmit @mousedown fire callback 必須開 openRescrape(null,'search')，實際: {wiring!r}"
+        assert "searchQuery" in wiring, \
+            f"#btnSubmit @mousedown fire callback 必須以 searchQuery 預填 rescrapeNumber（US5-a），實際: {wiring!r}"
+        assert "rescrapeEnabled()" in wiring, \
+            f"#btnSubmit @mousedown enabledFn 必須是 rescrapeEnabled()（toggle OFF gate），實際: {wiring!r}"
+
+    def test_submit_btn_six_events_wired(self):
+        """62c-2：#btnSubmit 六事件齊全且接共用 longPress*（mousedown/up/leave + touchstart.passive/end/cancel）。"""
+        tag = self._submit_btn(self._html())
+        assert re.search(r'@mousedown="longPressStart\(', tag), "#btnSubmit 缺 @mousedown longPressStart"
+        assert re.search(r'@mouseup="longPressEnd\(\)"', tag), "#btnSubmit 缺 @mouseup longPressEnd()"
+        assert re.search(r'@mouseleave="longPressCancel\(\)"', tag), "#btnSubmit 缺 @mouseleave longPressCancel()"
+        assert re.search(r'@touchstart\.passive="longPressStart\(', tag), "#btnSubmit 缺 @touchstart.passive longPressStart"
+        assert re.search(r'@touchend="longPressEnd\(\)"', tag), "#btnSubmit 缺 @touchend longPressEnd()"
+        assert re.search(r'@touchcancel="longPressCancel\(\)"', tag), "#btnSubmit 缺 @touchcancel longPressCancel()"
 
     def test_submit_btn_click_guard_preserved(self):
-        """#btnSubmit @click 仍走 advancedLongPressClickGuard（CD-62-9 #2，US8 不連帶送出）。"""
+        """62c-2（翻轉）：#btnSubmit @click 改走共用 longPressClickGuard（US8：preventDefault 取消隱式 form 送出）。"""
         tag = self._submit_btn(self._html())
         m = re.search(r'@click="([^"]*)"', tag)
         assert m, "#btnSubmit 缺 @click guard"
-        assert "advancedLongPressClickGuard($event)" in m.group(1), \
-            f"#btnSubmit @click 必須 advancedLongPressClickGuard($event)，實際: {m.group(1)!r}"
+        assert "longPressClickGuard($event)" in m.group(1), \
+            f"#btnSubmit @click 必須 longPressClickGuard($event)（62c-2 共用 helper），實際: {m.group(1)!r}"
 
-    def test_form_submit_guard_preserved(self):
-        """form-level submit guard 必須保留 advancedLongPressSubmitGuard()（CD-62-9 #2，US8 硬約束）。"""
+    def test_form_submit_guard_removed(self):
+        """62c-2（翻轉）：form submit guard 已移除，#searchForm @submit.prevent 直接走 doSearch()。
+
+        62c-1 為「留給 62c-2」立 placeholder 斷言 submit guard 保留；本 task 兌現方案 A：
+        US8 改由 longPressClickGuard 的 preventDefault 取消 submit 按鈕隱式 form 送出保護（路徑 A），
+        form submit guard 對 US8 零貢獻（路徑 A 被 click 攔掉、路徑 C Enter 本就不設旗標）→ 移除誤導死碼。
+        """
         html = self._html()
         m = re.search(r'<form\b[^>]*\bid="searchForm"[^>]*@submit\.prevent="([^"]*)"', html)
         assert m, "search.html #searchForm @submit.prevent guard 不存在"
-        assert "advancedLongPressSubmitGuard()" in m.group(1), \
-            f"form submit guard 必須含 advancedLongPressSubmitGuard()（US8 保留），實際: {m.group(1)!r}"
+        guard = m.group(1)
+        assert "advancedLongPressSubmitGuard" not in guard, \
+            f"62c-2：form @submit 不應再含 advancedLongPressSubmitGuard（已移除），實際: {guard!r}"
+        assert "doSearch()" in guard, \
+            f"62c-2：form @submit 應直接走 doSearch()，實際: {guard!r}"
 
-    # ── advanced-picker.js fire body 改動 ──
+    def test_search_html_no_advanced_long_press_wiring(self):
+        """62c-2 負向：search.html 不應殘留任何 advancedLongPress* wiring（rewire 後全改共用 longPress*）。
 
-    def test_longpress_fire_opens_rescrape_search(self):
-        """advancedLongPressStart 的 setTimeout fire body 必須開共用彈窗 openRescrape(null, 'search')。"""
+        eslint 僅 lint web/static/js/**（search.html 無 JS eslint 管線），故「search.html 不應殘留
+        advancedLongPress*」沿用 62c-1 test_search_html_no_advanced_picker_modal 的 fallback：pytest 讀 HTML 字串。
+        """
+        html = self._html()
+        for dead in ("advancedLongPressStart", "advancedLongPressEnd", "advancedLongPressCancel",
+                     "advancedLongPressClickGuard", "advancedLongPressSubmitGuard"):
+            assert dead not in html, \
+                f"62c-2 違規：search.html 仍殘留 {dead}（應全改接共用 shared/long-press.js）"
+
+    # ── advanced-picker.js mixin 移除 ──
+
+    def test_picker_long_press_mixin_removed(self):
+        """62c-2（翻轉）：advanced-picker.js 整套 advancedLongPress* mixin + 旗標 + LONG_PRESS_MS 已移除。
+
+        62c-1 fire body / submit guard / 旗標保留在 picker；62c-2 改接共用 shared/long-press.js
+        （longPressState），fire callback 移到 template arrow → picker 不再有任何長壓 timer/guard/旗標。
+        US8 由 longPressClickGuard preventDefault 保護（見 class docstring）。
+        """
         src = self._picker()
-        assert re.search(r"openRescrape\(\s*null\s*,\s*'search'\s*\)", src), \
-            "advancedLongPressStart fire body 必須呼叫 openRescrape(null, 'search')（取代 B1 picker 開窗）"
-        # 旗標保留：仍設 _advancedLongPressFired = true（US8 攔截同一次 click/submit）
-        assert "_advancedLongPressFired = true" in src, \
-            "advancedLongPressStart 必須保留 _advancedLongPressFired = true（US8 旗標一致）"
-        # 番號預填 searchQuery（US5-a）
-        assert "this.searchQuery" in src, \
-            "advancedLongPressStart fire body 必須以 searchQuery 預填 rescrapeNumber（US5-a）"
-
-    def test_picker_submit_guard_retained(self):
-        """advancedLongPressSubmitGuard 本體必須保留在 advanced-picker.js（form-level，showcase helper 不含）。"""
-        src = self._picker()
-        assert re.search(r"advancedLongPressSubmitGuard\s*\(", src), \
-            "advanced-picker.js 必須保留 advancedLongPressSubmitGuard（裁示 1 / CD-62-9 #2）"
+        for dead in ("advancedLongPressStart", "advancedLongPressEnd", "advancedLongPressCancel",
+                     "advancedLongPressClickGuard", "advancedLongPressSubmitGuard",
+                     "_advancedLongPressFired", "_advancedLongPressTimer", "LONG_PRESS_MS"):
+            assert dead not in src, \
+                f"62c-2 違規：advanced-picker.js 仍殘留長壓死碼 {dead}（已改接共用 longPressState）"
+        # 保留 advancedSearch 系本體
+        assert re.search(r"async\s+advancedSearch\s*\(", src), \
+            "advanced-picker.js 必須保留 advancedSearch(source) 本體"
 
     def test_picker_dead_methods_removed(self):
         """負向：B1 picker-modal 專屬 method（advancedPicker* / _advancedSortedSources）已移除。"""
@@ -8224,3 +8273,36 @@ class TestSearchRescrapeEntryGuard:
         html = self._html()
         assert "{% include '_advanced_search_bootstrap.html' %}" in html, \
             "62a-0 回歸：search.html 必須保留 _advanced_search_bootstrap.html include"
+
+
+class TestDesignSystemLongPressCard:
+    """62c-2 (b)：/design-system 登記 long-press 互動 pattern demo card（D.14）。
+
+    與 D.13 Source Pill card 同批登記、同 #ds-settings-components section（settings-components.html）。
+    對齊既有 design-system 守衛慣例（test_design_system_no_inline_bg_card_pattern 等）：HTML 字串斷言走 pytest
+    （design-system 是 HTML template、無 HTML eslint 管線）。正向：card 存在 + 引用 longPressState/long-press + 700ms。
+    負向（CD-62-0 #7 §7.4）：card 刻意無 hold-progress 進度環 / progress-ring / data-tooltip affordance。
+    """
+
+    SETTINGS_COMPONENTS_HTML = (
+        Path(__file__).parent.parent.parent / "web" / "templates"
+        / "design_system" / "settings-components.html"
+    )
+
+    def _html(self):
+        return self.SETTINGS_COMPONENTS_HTML.read_text(encoding="utf-8")
+
+    def test_long_press_card_present(self):
+        """settings-components.html 含 long-press demo card（標題 + longPressStart/long-press 引用 + 700ms）。"""
+        html = self._html()
+        assert "Long-press" in html, "design-system 缺 long-press demo card 標題（Long-press）"
+        assert "longPressStart" in html, "long-press demo card 必須引用共用 helper longPressStart"
+        assert "long-press.js" in html, "long-press demo card 必須引用 shared/long-press.js"
+        assert "700" in html, "long-press demo card 必須標出 700ms 長壓門檻"
+
+    def test_long_press_card_no_progress_ring_or_tooltip(self):
+        """負向（CD-62-0 #7 §7.4）：long-press card 不得含 hold-progress / progress-ring / data-tooltip affordance。"""
+        html = self._html()
+        for forbidden in ("hold-progress", "progress-ring", "data-tooltip"):
+            assert forbidden not in html, \
+                f"long-press demo card 不應含 {forbidden}（刻意無進度環 / 無 tooltip，CD-62-0 #7）"
