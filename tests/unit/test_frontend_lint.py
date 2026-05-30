@@ -7428,3 +7428,119 @@ class TestSettingsPanelStructureGuard:
         assert "form.primarySource" in html, (
             "61b-4 違規：primarySource binding 不可刪（61c-1 接手前保留元素）"
         )
+
+
+# ─── TASK-62a-0: source pill 跨頁共用 component + bootstrap 注入 ───
+SOURCE_PILL_CSS         = Path(__file__).parent.parent.parent / "web" / "static" / "css" / "components" / "source-pill.css"
+SETTINGS_CSS            = Path(__file__).parent.parent.parent / "web" / "static" / "css" / "pages" / "settings.css"
+BASE_HTML               = Path(__file__).parent.parent.parent / "web" / "templates" / "base.html"
+ADV_SEARCH_BOOTSTRAP    = Path(__file__).parent.parent.parent / "web" / "templates" / "_advanced_search_bootstrap.html"
+
+
+class TestSourcePillSharedComponentGuard:
+    """TASK-62a-0: source pill 抽成 unscoped 共用 component + bootstrap partial 跨頁注入。
+
+    鎖住「樣式去 #settings-components scope + class rename」與「__ADVANCED_SEARCH__
+    抽 partial 供 Search/Showcase 共用」兩道靜態 glue。視覺等價走 Manual checklist。
+    """
+
+    def _source_pill_css(self):
+        return SOURCE_PILL_CSS.read_text(encoding="utf-8")
+
+    def _settings_css(self):
+        return SETTINGS_CSS.read_text(encoding="utf-8")
+
+    def _base_html(self):
+        return BASE_HTML.read_text(encoding="utf-8")
+
+    def _bootstrap(self):
+        return ADV_SEARCH_BOOTSTRAP.read_text(encoding="utf-8")
+
+    def _search_html(self):
+        return SEARCH_HTML.read_text(encoding="utf-8")
+
+    def _showcase_html(self):
+        return SHOWCASE_HTML.read_text(encoding="utf-8")
+
+    def _settings_html(self):
+        return SETTINGS_HTML.read_text(encoding="utf-8")
+
+    def test_source_pill_css_exists_with_selectors(self):
+        """source-pill.css 存在且含全部 component 選擇器 + strikethrough contract。"""
+        assert SOURCE_PILL_CSS.exists(), "62a-0 違規：缺少 web/static/css/components/source-pill.css"
+        css = self._source_pill_css()
+        for sel in [
+            ".source-pill",
+            ".source-pill--uncensored",
+            ".source-pill--manual-only",
+            ".source-pill-mt-badge",
+            ".source-pill-badge",
+            ".source-pill.is-partsbin",
+            '.source-pill[data-enabled="false"] .pill-name',
+        ]:
+            assert sel in css, f"62a-0 違規：source-pill.css 缺少選擇器 {sel!r}"
+
+    def test_source_pill_css_is_unscoped(self):
+        """source-pill.css 不得含 #settings-components（確保 cross-page unscoped）。"""
+        assert "#settings-components" not in self._source_pill_css(), (
+            "62a-0 違規：source-pill.css 不應含 #settings-components scope"
+        )
+
+    def test_settings_css_no_longer_defines_pill(self):
+        """settings.css 不再含 .settings-sources-pill 本體規則（無兩份定義）。
+
+        容器 .settings-sources-pills（複數）為 settings 專屬 layout，刻意保留，
+        排除它後 settings.css 不應再有任何 settings-sources-pill 規則。
+        """
+        css = self._settings_css()
+        stripped = re.sub(r"settings-sources-pills\b", "", css)
+        assert "settings-sources-pill" not in stripped, (
+            "62a-0 違規：settings.css 仍含 settings-sources-pill（pill 規則應已搬至 source-pill.css）"
+        )
+
+    def test_base_html_links_source_pill_css(self):
+        """base.html 載入 source-pill.css（全域 component）。"""
+        assert "/static/css/components/source-pill.css" in self._base_html(), (
+            "62a-0 違規：base.html 未 <link> source-pill.css"
+        )
+
+    def test_bootstrap_partial_exists_with_injection(self):
+        """_advanced_search_bootstrap.html 存在且注入 __ADVANCED_SEARCH__ + config 欄位。"""
+        assert ADV_SEARCH_BOOTSTRAP.exists(), (
+            "62a-0 違規：缺少 web/templates/_advanced_search_bootstrap.html"
+        )
+        html = self._bootstrap()
+        for token in [
+            "window.__ADVANCED_SEARCH__",
+            "config.advanced_search_enabled",
+            "config.sources",
+        ]:
+            assert token in html, f"62a-0 違規：bootstrap partial 缺少 {token!r}"
+
+    def test_search_and_showcase_include_bootstrap(self):
+        """search.html + showcase.html 皆 include bootstrap partial。"""
+        for name, html in [("search.html", self._search_html()),
+                            ("showcase.html", self._showcase_html())]:
+            assert "{% include '_advanced_search_bootstrap.html' %}" in html, (
+                f"62a-0 違規：{name} 未 include _advanced_search_bootstrap.html"
+            )
+
+    def test_search_html_no_inline_advanced_search(self):
+        """search.html 不再 inline 定義 window.__ADVANCED_SEARCH__（改走 include）。"""
+        html = self._search_html()
+        assert "window.__ADVANCED_SEARCH__ =" not in html, (
+            "62a-0 違規：search.html 仍 inline 定義 __ADVANCED_SEARCH__（應改用 include）"
+        )
+
+    def test_settings_html_uses_source_pill_class(self):
+        """settings.html pill markup 改用 source-pill（無 settings-sources-pill 殘留）。
+
+        容器 .settings-sources-pills（複數）為 settings 專屬 layout，刻意保留，
+        故排除它後再檢查；pill 本體 / badge / mt-badge / modifier 不應有 settings-sources- 前綴。
+        """
+        html = self._settings_html()
+        # 移除合法保留的容器 class（複數 pills），再檢查殘留 pill 前綴
+        stripped = re.sub(r"settings-sources-pills\b", "", html)
+        assert "settings-sources-pill" not in stripped, (
+            "62a-0 違規：settings.html 仍含 settings-sources-pill class（應 rename 為 source-pill）"
+        )

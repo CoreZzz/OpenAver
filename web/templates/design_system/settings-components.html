@@ -819,3 +819,80 @@
   &lt;button @click="cancelAddTag()" class="btn btn-sm tag-cancel"&gt;✕&lt;/button&gt;
 &lt;/span&gt;</code></pre>
 </div>
+
+<!-- D.13: Source Pill (cross-page shared component, TASK-62a-0) -->
+<div class="ds-subsection">
+    <h3>13. Source Pill（跨頁共用元件）</h3>
+    <p class="ds-desc">
+        掃描來源膠囊 — 來源排序開關 / parts-bin 推薦。元件已從 settings.css 抽至
+        <code>components/source-pill.css</code> 並去 <code>#settings-components</code> scope，
+        故 Settings / Search / Showcase 皆可直接渲染。
+        <strong>本卡刻意不包 <code>id="settings-components"</code></strong> — 仍正確著色即證明已 unscoped。
+    </p>
+
+    <!-- NOTE: 無 id="settings-components" 包裹（unscoped component 的證明） -->
+    <div class="ds-card-demo" style="max-width: 700px; margin: 0 auto; padding: 1.5rem; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+        <!-- 啟用（有碼 accent） -->
+        <div class="source-pill" data-enabled="true">
+            <i class="bi bi-slash-circle slash-icn" aria-hidden="true"></i>
+            <span class="pill-name">JavBus</span>
+        </div>
+
+        <!-- 停用（slash + strikethrough + dashed） -->
+        <div class="source-pill" data-enabled="false">
+            <i class="bi bi-slash-circle slash-icn" aria-hidden="true"></i>
+            <span class="pill-name">DMM</span>
+        </div>
+
+        <!-- 無碼啟用（success accent） -->
+        <div class="source-pill source-pill--uncensored" data-enabled="true">
+            <i class="bi bi-slash-circle slash-icn" aria-hidden="true"></i>
+            <span class="pill-name">FC2</span>
+        </div>
+
+        <!-- manual-only（BETA badge + dashed accent，不 strikethrough） -->
+        <div class="source-pill source-pill--manual-only" data-enabled="false">
+            <i class="bi bi-slash-circle slash-icn" aria-hidden="true"></i>
+            <span class="pill-name">JavLibrary</span>
+            <span class="source-pill-badge">BETA</span>
+        </div>
+
+        <!-- metatube（m 角標 + 斷線無 hover lift） -->
+        <div class="source-pill is-disconnected" data-enabled="false">
+            <i class="bi bi-slash-circle slash-icn" aria-hidden="true"></i>
+            <span class="pill-name">MetaTube</span>
+            <span class="source-pill-mt-badge" aria-hidden="true">m</span>
+        </div>
+
+        <!-- parts-bin 推薦（warning accent + rec-star） -->
+        <div class="source-pill is-partsbin" data-enabled="false" data-rec="true">
+            <i class="bi bi-star-fill rec-star" aria-hidden="true"></i>
+            <i class="bi bi-slash-circle slash-icn" aria-hidden="true"></i>
+            <span class="pill-name">Recommended</span>
+        </div>
+    </div>
+
+    <pre class="ds-code"><code>&lt;!-- unscoped：不需 id="settings-components" 包裹 --&gt;
+&lt;!-- 啟用 / 停用 --&gt;
+&lt;div class="source-pill" data-enabled="true"&gt;
+  &lt;i class="bi bi-slash-circle slash-icn"&gt;&lt;/i&gt;
+  &lt;span class="pill-name"&gt;JavBus&lt;/span&gt;
+&lt;/div&gt;
+
+&lt;!-- 無碼（success accent）--&gt;
+&lt;div class="source-pill source-pill--uncensored" data-enabled="true"&gt;...&lt;/div&gt;
+
+&lt;!-- manual-only（BETA badge）--&gt;
+&lt;div class="source-pill source-pill--manual-only" data-enabled="false"&gt;
+  &lt;span class="pill-name"&gt;JavLibrary&lt;/span&gt;
+  &lt;span class="source-pill-badge"&gt;BETA&lt;/span&gt;
+&lt;/div&gt;
+
+&lt;!-- metatube（m 角標）--&gt;
+&lt;span class="source-pill-mt-badge"&gt;m&lt;/span&gt;
+
+&lt;!-- parts-bin 推薦（rec-star）--&gt;
+&lt;div class="source-pill is-partsbin" data-enabled="false" data-rec="true"&gt;
+  &lt;i class="bi bi-star-fill rec-star"&gt;&lt;/i&gt;...
+&lt;/div&gt;</code></pre>
+</div>

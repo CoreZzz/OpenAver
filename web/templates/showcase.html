@@ -7,6 +7,8 @@
 {% endblock %}
 
 {% block pre_alpine_module %}
+{# 進階搜尋 SSR 注入（TASK-62a-0）。放 main.js 之前確保 __ADVANCED_SEARCH__ 就緒。 #}
+{% include '_advanced_search_bootstrap.html' %}
 <script type="module" src="/static/js/pages/showcase/main.js"></script>
 {% endblock %}
 

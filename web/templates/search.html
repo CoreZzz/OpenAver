@@ -1010,13 +1010,8 @@
 {% endblock %}
 
 {% block pre_alpine_module %}
-<!-- TASK-61c-7: 進階搜尋 SSR 注入（enabled gate + sources 清單，避免新增 fetch 往返） -->
-<script>
-window.__ADVANCED_SEARCH__ = {
-    enabled: {{ config.advanced_search_enabled|default(false)|tojson|safe }},
-    sources: {{ (config.sources or [])|tojson|safe }}
-};
-</script>
+{# 進階搜尋 SSR 注入抽至共用 partial（TASK-62a-0），Search/Showcase 共用 #}
+{% include '_advanced_search_bootstrap.html' %}
 <script type="module" src="/static/js/pages/search/main.js"></script>
 {% endblock %}
 
