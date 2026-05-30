@@ -356,8 +356,10 @@ class TestEnrichSingleModeValidation:
 # ── CD-62-4: refresh_full + overwrite_existing=false 分裂陷阱智慧防呆 ──────────
 
 class TestEnrichRefreshFullOverwriteGuard:
-    """智慧版守衛：僅當 NFO 與 cover 皆已存在（純分裂）才回 400；
-    缺封面 quick-enrich（refresh_full+overwrite=false+cover缺）放行（零回歸）。
+    """智慧版守衛：refresh_full+overwrite=false 時，若這組設定不會寫出任何 sidecar
+    （NFO/cover）卻仍 _db_upsert（純分裂）才回 400。一個 sidecar「會寫」= write 旗標開
+    且檔案缺。兩者皆不會寫 → 400；任一會寫 → 放行（缺封面 quick-enrich 零回歸）。
+    涵蓋 write_nfo/write_cover 皆 false 的純 DB-only 路徑（Codex P1）。
     mock 由 patch resolve_nfo_cover_paths（router 命名空間）+ os.path.exists。"""
 
     def _patch_paths(self, mocker, nfo_exists, cover_exists):
@@ -458,6 +460,47 @@ class TestEnrichRefreshFullOverwriteGuard:
             "number": "SONE-205",
             "mode": "fill_missing",
             "overwrite_existing": False,
+        })
+
+        assert response.status_code == 200
+        mock_enrich.assert_called_once()
+
+    def test_refresh_full_overwrite_false_write_flags_off_returns_400(self, client, mocker):
+        """write_nfo=false + write_cover=false，檔案皆缺 → 仍 400（零寫檔純 DB-only 分裂），
+        enrich_single 未被呼叫（Codex P1：存在性 AND 檢查補上 write 旗標）。"""
+        self._patch_paths(mocker, nfo_exists=False, cover_exists=False)
+        mock_enrich = mocker.patch(
+            "web.routers.scraper.enrich_single", return_value=_ok_result()
+        )
+
+        response = client.post("/api/enrich-single", json={
+            "file_path": "/video/SONE-205.mp4",
+            "number": "SONE-205",
+            "mode": "refresh_full",
+            "overwrite_existing": False,
+            "write_nfo": False,
+            "write_cover": False,
+        })
+
+        assert response.status_code == 400
+        detail = response.json().get("detail", "")
+        assert "overwrite" in detail or "分裂" in detail
+        mock_enrich.assert_not_called()
+
+    def test_refresh_full_overwrite_false_one_flag_off_one_will_write_passes(self, client, mocker):
+        """write_cover=false 但 write_nfo=true 且 NFO 缺 → will_write_nfo=true → 200 放行。"""
+        self._patch_paths(mocker, nfo_exists=False, cover_exists=True)
+        mock_enrich = mocker.patch(
+            "web.routers.scraper.enrich_single", return_value=_ok_result()
+        )
+
+        response = client.post("/api/enrich-single", json={
+            "file_path": "/video/SONE-205.mp4",
+            "number": "SONE-205",
+            "mode": "refresh_full",
+            "overwrite_existing": False,
+            "write_nfo": True,
+            "write_cover": False,
         })
 
         assert response.status_code == 200

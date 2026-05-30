@@ -209,15 +209,19 @@ def enrich_single_endpoint(request: EnrichRequest) -> dict:
     proxy_url = search_cfg.get("proxy_url", "")
     primary_source = search_cfg.get("primary_source", "javbus")
 
-    # CD-62-4 分裂陷阱智慧防呆：refresh_full + overwrite=false 且 NFO 與 cover 皆已存在
-    # → 零寫檔但 DB 照 upsert（純分裂）→ 擋。缺任一檔則放行（quick-enrich 零回歸）。
+    # CD-62-4 分裂陷阱智慧防呆：refresh_full + overwrite=false 時，若這組設定不會寫出任何
+    # sidecar（NFO/cover）卻仍 _db_upsert，就是純分裂。一個 sidecar「會寫」需 write 旗標開 + 檔案缺
+    # （此分支 overwrite 已為 false，既有檔不覆寫）。兩者皆不會寫 → 擋；任一會寫則放行（quick-enrich
+    # 缺封面零回歸）。涵蓋 write_nfo/write_cover 皆 false 的純 DB-only 路徑（Codex P1）。
     # 在 try 之前 raise，避免被下方 except Exception 吞成籠統 200。
     if request.mode == "refresh_full" and not request.overwrite_existing:
         nfo_path, cover_path = resolve_nfo_cover_paths(request.file_path)
-        if os.path.exists(nfo_path) and os.path.exists(cover_path):
+        will_write_nfo = request.write_nfo and not os.path.exists(nfo_path)
+        will_write_cover = request.write_cover and not os.path.exists(cover_path)
+        if not will_write_nfo and not will_write_cover:
             raise HTTPException(
                 status_code=400,
-                detail="refresh_full 對已有 NFO+封面的影片需 overwrite_existing=true（否則只更新 DB 造成與磁碟分裂）",
+                detail="refresh_full + overwrite_existing=false 在此設定下不會寫出任何 NFO/封面，只會更新 DB 造成與磁碟分裂；請開 overwrite_existing 或啟用至少一個缺檔的 write 旗標",
             )
 
     try:
