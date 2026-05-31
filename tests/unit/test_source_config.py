@@ -254,16 +254,26 @@ def test_requires_proxy_other_builtins_false():
 
 
 # ---------------------------------------------------------------------------
-# C. validate_source_id 不回歸（63a 不放行 metatube）（CD-63a-2）
+# C. validate_source_id metatube 放行（63c，CD-63c-1）
 # ---------------------------------------------------------------------------
-def test_validate_source_id_metatube_fanza_false():
-    """63a 契約：metatube id 維持 False（63c 改時翻此測）"""
-    assert validate_source_id('metatube:FANZA') is False
+def test_validate_source_id_metatube_fanza_true():
+    """63c 放行：metatube:FANZA → True"""
+    assert validate_source_id('metatube:FANZA') is True
 
 
-def test_validate_source_id_metatube_anything_false():
-    """任何 metatube: 開頭的 id 在 63a 維持 False"""
-    assert validate_source_id('metatube:anything') is False
+def test_validate_source_id_metatube_anything_true():
+    """任何 metatube:<非空> 開頭的 id 在 63c 放行 → True"""
+    assert validate_source_id('metatube:anything') is True
+
+
+def test_validate_source_id_metatube_empty_suffix_false():
+    """metatube:（空後綴）→ False（非空後綴守衛）"""
+    assert validate_source_id('metatube:') is False
+
+
+def test_validate_source_id_metatube_no_colon_false():
+    """'metatube'（無冒號）→ False"""
+    assert validate_source_id('metatube') is False
 
 
 def test_validate_source_id_auto_not_regressed():

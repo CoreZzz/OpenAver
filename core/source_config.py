@@ -196,8 +196,14 @@ def validate_source_id(sid: str) -> bool:
 
     - 'auto' → True（特判，CD-61-5；但 get_builtin_sources() 不含 auto）。
     - 8 個 builtin id → True。
+    - 'metatube:*'（非空後綴）→ True（63c，CD-63c-1）。
     - 其他 → False。
     """
     if sid == 'auto':
         return True
-    return sid in SOURCE_ORDER
+    if sid in SOURCE_ORDER:
+        return True
+    # 63c：放行 metatube provider id（CD-63a-2 延到此 task）
+    if sid.startswith('metatube:') and len(sid) > len('metatube:'):
+        return True
+    return False

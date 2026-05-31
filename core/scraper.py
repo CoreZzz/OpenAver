@@ -28,6 +28,12 @@ from core.source_merger import merge_results
 from core.source_config import validate_source_id
 from core.source_settings import get_enabled_source_ids
 
+# 63c metatube routing imports（CD-63c-1 / CD-63c-2 / CD-63c-3）
+from core.metatube.client import MetatubeHttpClient, pick_movie_result
+from core.metatube.mapper import map_movie_info
+from core.metatube.state import metatube_state
+from core.metatube.errors import MetatubeUnavailable, MetatubeNotFound, MetatubeAuthError
+
 
 # ============ 全域設定 ============
 
@@ -125,6 +131,61 @@ def expand_partial_number(partial: str) -> List[str]:
     return candidates
 
 
+# ============ 63c metatube internal carrier keys + strip helper ============
+
+_INTERNAL_NFO_KEYS = ('_summary', '_rating')
+
+
+def strip_internal_nfo_keys(result_dict: dict) -> dict:
+    """移除 internal NFO carrier 鍵（_summary / _rating），回傳 shallow copy。
+
+    保留 _source / _mode / _all_variant_ids 等前端所需 _ 前綴鍵。
+    （spec §161 enforcement，CD-63c-5）
+    """
+    return {k: v for k, v in result_dict.items() if k not in _INTERNAL_NFO_KEYS}
+
+
+# ============ 63c _MetatubeShim（CD-63c-3）============
+
+class _MetatubeShim:
+    """metatube provider 的 scraper-compatible shim（CD-63c-3）。
+
+    讓 metatube provider 能插入現有 source_to_scraper 架構，
+    使用相同的 .search() 介面，不改 search_jav() 的 scraper 迭代邏輯。
+    """
+    def __init__(self, provider: str, base_url: str, token: str) -> None:
+        self.source = f'metatube:{provider}'
+        self._provider = provider
+        self._client = MetatubeHttpClient(base_url, token)
+
+    def search(self, number: str) -> 'Video | None':
+        try:
+            results = self._client.search(self._provider, number)
+            picked = pick_movie_result(results)
+            if not picked:
+                return None
+            info = self._client.get_info(self._provider, picked['id'])
+            if not info:
+                return None
+            video = map_movie_info(info)
+            # routing 期 success → mark available（lazy liveness）
+            metatube_state.mark_available(self.source)
+            return video
+        except MetatubeUnavailable:
+            metatube_state.mark_failed(self.source)
+            raise
+        except MetatubeNotFound:
+            # 404 = 番號不在此源 = 不算失敗（spec §5.3 / CD-63a-6）
+            return None
+        except MetatubeAuthError:
+            # Token 錯誤：不 mark_failed（連線層問題，非 provider 問題）
+            logger.warning('metatube auth error for %s', self.source)
+            return None
+        except Exception:
+            logger.exception('metatube shim unexpected error for %s', self.source)
+            return None
+
+
 # ============ 核心搜尋函數 ============
 
 def _is_dmm_enabled(proxy_url: str) -> bool:
@@ -192,35 +253,88 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', primary_s
         'avsox': lambda: [AVSOXScraper()],
     }
 
-    # 決定要跑哪些爬蟲
-    scrapers = []
+    # 63c：動態注入 metatube provider（CD-63c-2）
+    # availability_map 的 False entry 仍加進 source_to_scraper——
+    # get_enabled_source_ids(availability_map) 已在上一層排除不可達的 source，
+    # 不需 double-gate（explicit picker 選當前 probe-failed provider 也應能試打）。
+    if metatube_state.is_connected:
+        _mt_url = metatube_state.base_url or ''
+        _mt_token = metatube_state.token or ''
+        for _mt_name, _mt_avail in metatube_state.availability_map().items():
+            _mt_provider = _mt_name[len('metatube:'):]
+            # 用 default arg 固定 closure variable capture（風險點 a）
+            source_to_scraper[_mt_name] = (
+                lambda _pname=_mt_provider, _url=_mt_url, _tok=_mt_token:
+                    [_MetatubeShim(_pname, _url, _tok)]
+            )
+
+    # 決定要跑哪些爬蟲（auto vs. explicit）
+    logger.info(f"[Search] {number} 使用來源: {source}")
     if source == 'auto':
-        # auto fan-out 改讀 Runtime Auto Pool（enabled=True AND manual_only=False，依 order）。
-        # DMM proxy guard 由 source_to_scraper['dmm'] 的 dmm_config 條件自然吸收：
-        # 即使 'dmm' 在 enabled list，無 proxy（dmm_config 為 None）時 factory 回 [] → 不加入。
-        for sid in get_enabled_source_ids():
+        # auto fan-out（CD-63c-4）：
+        # - builtin：循序執行（維持既有行為）
+        # - metatube：defer 到 ThreadPoolExecutor 並行（bounded parallel fan-out）
+        # - 結果以 enabled_sids 順序重建 all_data（保全 user-drag merge 優先度）
+        # get_enabled_source_ids 傳入 availability_map 讓 metatube gate 生效（🔴 CRITICAL）
+        enabled_sids = get_enabled_source_ids(availability_map=metatube_state.availability_map())
+        results_by_source: Dict[str, Video] = {}
+        metatube_shims = []  # list of (sid, shim) for parallel dispatch
+
+        for sid in enabled_sids:
             factory = source_to_scraper.get(sid)
-            if factory:
-                scrapers.extend(factory())
+            if not factory:
+                continue
+            if sid.startswith('metatube:'):
+                metatube_shims.extend((sid, s) for s in factory())  # defer
+            else:
+                for scraper in factory():  # builtin：循序，維持既有行為
+                    try:
+                        scraper_name = scraper.__class__.__name__
+                        logger.debug(f"[Search] 嘗試 {scraper_name}...")
+                        v = scraper.search(number)
+                        if v:
+                            results_by_source[v.source] = v
+                            logger.debug(f"[Search] {scraper_name} 找到結果")
+                    except Exception as e:
+                        logger.debug(f"[Search] {scraper_name} 錯誤: {e}")
+                        continue
+
+        # metatube subset：bounded parallel
+        if metatube_shims:
+            with ThreadPoolExecutor(max_workers=min(len(metatube_shims), 5)) as ex:
+                futs = [(sid, ex.submit(shim.search, number)) for sid, shim in metatube_shims]
+                for sid, fut in futs:  # 按 user order 收（submit 順序 = user order；非 as_completed）
+                    try:
+                        v = fut.result()
+                        if v:
+                            results_by_source[v.source] = v
+                    except Exception:
+                        continue
+
+        # rebuild all_data 按 enabled_sids（user-drag）順序，保全 merge 優先度契約
+        # v.source == sid，對 builtin 和 metatube 均成立（mapper 設 source='metatube:{provider}'）
+        all_data = {
+            sid: results_by_source[sid]
+            for sid in enabled_sids
+            if sid in results_by_source
+        }
     else:
-        # explicit 單一來源 dispatch。未知 id 理論上已被 validate_source_id 攔截，
+        # explicit 單一來源 dispatch（CD-63c-6）。未知 id 理論上已被 validate_source_id 攔截，
         # factory 缺失時回空 list（行為等同舊 dead-else fallback）。
         factory = source_to_scraper.get(source)
         scrapers = factory() if factory else []
 
-    # 執行搜尋
-    logger.info(f"[Search] {number} 使用來源: {source}")
-    for scraper in scrapers:
-        try:
-            scraper_name = scraper.__class__.__name__
-            logger.debug(f"[Search] 嘗試 {scraper_name}...")
-            video = scraper.search(number)
-            if video:
-                all_data[video.source] = video
-                logger.debug(f"[Search] {scraper_name} 找到結果")
-        except Exception as e:
-            logger.debug(f"[Search] {scraper_name} 錯誤: {e}")
-            continue
+        for scraper in scrapers:
+            try:
+                scraper_name = scraper.__class__.__name__
+                logger.debug(f"[Search] 嘗試 {scraper_name}...")
+                video = scraper.search(number)
+                if video:
+                    all_data[video.source] = video
+                    logger.debug(f"[Search] {scraper_name} 找到結果")
+            except Exception as e:
+                logger.debug(f"[Search] {scraper_name} 錯誤: {e}")
+                continue
 
     if not all_data:
         logger.info(f"[Search] {number} 無結果")
@@ -246,7 +360,9 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', primary_s
             main_video = main_video.model_copy(update={'maker': maker})
 
     result = main_video.to_legacy_dict()
-    result['_source'] = main_video.source # 保留內部欄位
+    result['_source'] = main_video.source  # 保留內部欄位
+    result['_summary'] = main_video.summary  # 63c 新增（NFO 用，不入 DB，CD-63c-5）
+    result['_rating'] = main_video.rating    # 63c 新增（NFO 用，已排除於 to_legacy_dict）
     logger.info(f"[Search] {number} 完成，來源: {main_video.source}")
     return result
 

@@ -64,7 +64,7 @@ class TestPipeline:
         """
         monkeypatch.setattr(
             "core.scraper.get_enabled_source_ids",
-            lambda: list(SOURCE_ORDER),
+            lambda availability_map=None: list(SOURCE_ORDER),
         )
 
     def test_uncensored_detection_d2pass(self):
@@ -217,7 +217,7 @@ class TestPipeline:
         javbus_first_order = ['javbus', 'dmm', 'jav321', 'javdb', 'fc2', 'avsox', 'heyzo']
         monkeypatch.setattr(
             "core.scraper.get_enabled_source_ids",
-            lambda: javbus_first_order,
+            lambda availability_map=None: javbus_first_order,
         )
 
         with patch.object(DMMScraper, 'search', return_value=dmm_video), \

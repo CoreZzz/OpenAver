@@ -201,7 +201,7 @@ class TestValidateSourceIntegration:
     def test_auto_is_accepted(self, monkeypatch):
         # 'auto' must pass validation; with empty enabled list -> no results -> None.
         _install_scraper_spies(monkeypatch)
-        monkeypatch.setattr(scraper_mod, 'get_enabled_source_ids', lambda: [])
+        monkeypatch.setattr(scraper_mod, 'get_enabled_source_ids', lambda availability_map=None: [])
         result = search_jav("ABP-001", source="auto")
         assert result is None
 
@@ -223,7 +223,7 @@ class TestAutoFanOutReadsEnabledIds:
     def test_auto_only_constructs_enabled_subset(self, monkeypatch):
         constructed = _install_scraper_spies(monkeypatch)
         monkeypatch.setattr(
-            scraper_mod, 'get_enabled_source_ids', lambda: ['javbus', 'javdb']
+            scraper_mod, 'get_enabled_source_ids', lambda availability_map=None: ['javbus', 'javdb']
         )
         search_jav("ABP-001", source="auto")
         assert constructed['JavBusScraper'] == 1
@@ -235,7 +235,7 @@ class TestAutoFanOutReadsEnabledIds:
 
     def test_auto_empty_enabled_list_returns_none(self, monkeypatch):
         constructed = _install_scraper_spies(monkeypatch)
-        monkeypatch.setattr(scraper_mod, 'get_enabled_source_ids', lambda: [])
+        monkeypatch.setattr(scraper_mod, 'get_enabled_source_ids', lambda availability_map=None: [])
         result = search_jav("ABP-001", source="auto")
         assert result is None
         assert all(v == 0 for v in constructed.values())
@@ -248,7 +248,7 @@ class TestDmmProxyGuard:
         # 'dmm' is in the enabled list but no proxy -> DMM must NOT be constructed.
         constructed = _install_scraper_spies(monkeypatch)
         monkeypatch.setattr(
-            scraper_mod, 'get_enabled_source_ids', lambda: ['dmm', 'javbus']
+            scraper_mod, 'get_enabled_source_ids', lambda availability_map=None: ['dmm', 'javbus']
         )
         search_jav("ABP-001", source="auto", proxy_url="")
         assert constructed['DMMScraper'] == 0
@@ -258,7 +258,7 @@ class TestDmmProxyGuard:
         # Proxy configured -> DMM included in the fan-out.
         constructed = _install_scraper_spies(monkeypatch)
         monkeypatch.setattr(
-            scraper_mod, 'get_enabled_source_ids', lambda: ['dmm', 'javbus']
+            scraper_mod, 'get_enabled_source_ids', lambda availability_map=None: ['dmm', 'javbus']
         )
         search_jav("ABP-001", source="auto", proxy_url="http://127.0.0.1:8080")
         assert constructed['DMMScraper'] == 1

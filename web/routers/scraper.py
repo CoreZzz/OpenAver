@@ -20,7 +20,7 @@ from core.db_inflow import try_inflow_upsert
 from core.enricher import enrich_single, fetch_samples_only, resolve_nfo_cover_paths
 from core.organizer import organize_file
 from core.path_utils import to_file_uri, uri_to_fs_path
-from core.scraper import search_jav, search_jav_single_source
+from core.scraper import search_jav, search_jav_single_source, strip_internal_nfo_keys
 from core.source_config import validate_source_id
 from core.logger import get_logger
 from core.config import load_config
@@ -196,7 +196,7 @@ def rescrape_preview_endpoint(request: RescrapePreviewRequest) -> dict:
 
         if result is None:
             return {"success": False}
-        return {"success": True, **result}
+        return {"success": True, **strip_internal_nfo_keys(result)}
     except Exception:
         logger.exception("rescrape_preview_endpoint 失敗")
         return {"success": False, "error": "預覽搜尋失敗，請查閱日誌"}

@@ -38,7 +38,7 @@ from core.source_settings import is_uncensored_mode_effective
 from core.scraper import (
     search_jav, smart_search, is_partial_number, is_number_format,
     is_prefix_only, search_partial, search_actress, search_prefix,
-    search_by_variant_id
+    search_by_variant_id, strip_internal_nfo_keys
 )
 from core.scrapers.utils import SOURCE_ORDER, SOURCE_NAMES
 
@@ -238,6 +238,8 @@ def search(
         # 判斷是否還有更多結果（prefix/actress 模式且結果數 = limit）
         has_more = detected_mode in ('prefix', 'actress') and len(results) >= limit
 
+        # strip internal NFO carrier keys before API echo（spec §161 / CD-63c-5）
+        results = [strip_internal_nfo_keys(r) for r in results]
         response_data = {
             "success": True,
             "data": results,
@@ -544,7 +546,9 @@ async def search_stream(
             sent_seed = True
             status_queue.put({'type': 'seed', 'slots': data})
         else:
-            status_queue.put({'type': 'result-item', 'slot': slot, 'data': data})
+            # strip internal NFO carrier keys at single upstream point（spec §161）
+            # covers both drain sites（L576 live + L590 post-completion）
+            status_queue.put({'type': 'result-item', 'slot': slot, 'data': strip_internal_nfo_keys(data)})
 
     def run_search():
         """在背景執行搜尋"""
@@ -622,11 +626,13 @@ async def search_stream(
                     yield f"data: {json.dumps(complete_response)}\n\n"
 
                 # 永遠送傳統 result event（向後相容，前端的 source of truth）
+                # strip internal NFO carrier keys before SSE final result echo（spec §161）
+                results_stripped = [strip_internal_nfo_keys(r) for r in results]
                 response = {
                     'type': 'result',
-                    'success': bool(results),
-                    'data': results,
-                    'total': len(results),
+                    'success': bool(results_stripped),
+                    'data': results_stripped,
+                    'total': len(results_stripped),
                     'mode': mode,
                     'offset': offset,
                     'has_more': has_more,
