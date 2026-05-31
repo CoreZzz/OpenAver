@@ -216,3 +216,21 @@ def test_provider_count_after_disconnect(state):
     assert state.provider_count == 3
     state.disconnect()
     assert state.provider_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Fix 2 (P1b): reconnect removes stale providers
+# ---------------------------------------------------------------------------
+
+def test_reconnect_removes_stale_providers(state):
+    """connect() 清舊 _availability，重連到不含舊 provider 的 server 後不殘留"""
+    state.connect('http://host', '', ['FANZA', 'HEYZO'])
+    # 重連到只有 JavBus 的 server
+    state.connect('http://host', '', ['JavBus'])
+
+    # 舊 provider 不應在 map 裡（因 connect 清空再重建）
+    availability = state.availability_map()
+    assert 'metatube:FANZA' not in availability
+    assert 'metatube:HEYZO' not in availability
+    # 新 provider 應在 map 且為 True
+    assert availability.get('metatube:JavBus') is True

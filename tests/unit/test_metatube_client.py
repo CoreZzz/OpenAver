@@ -309,6 +309,75 @@ class TestPickMovieResult:
 # TC-6: movie_id URL quoting in get_info
 # ============================================================
 
+# ============================================================
+# TC-7: Fix 3 (P2) — 200 but JSON body non-dict → MetatubeProtocolError
+# ============================================================
+
+class TestNonDictBodyProtocolError:
+
+    def test_get_data_non_dict_body_raises_protocol_error(self):
+        """200 + resp.json() 回 []（list）→ MetatubeProtocolError（via get_info）"""
+        client = make_client()
+        client._session.get = MagicMock(
+            return_value=make_json_response([], status_code=200)
+        )
+        with pytest.raises(MetatubeProtocolError):
+            client.get_info("FANZA", "1stars00141")
+
+    def test_list_providers_data_is_list_raises_protocol_error(self):
+        """200 + {"data": ["FANZA"]}（data 為 list）→ MetatubeProtocolError"""
+        client = make_client()
+        client._session.get = MagicMock(
+            return_value=make_json_response({"data": ["FANZA"]}, status_code=200)
+        )
+        with pytest.raises(MetatubeProtocolError):
+            client.list_providers()
+
+    def test_list_providers_movie_providers_is_list_raises_protocol_error(self):
+        """200 + {"data": {"movie_providers": []}}（movie_providers 非 dict）
+        → MetatubeProtocolError（per-method inner-shape guard, Codex P2 follow-up）"""
+        client = make_client()
+        client._session.get = MagicMock(
+            return_value=make_json_response(
+                {"data": {"movie_providers": []}}, status_code=200
+            )
+        )
+        with pytest.raises(MetatubeProtocolError):
+            client.list_providers()
+
+    def test_list_providers_missing_movie_providers_key_raises_protocol_error(self):
+        """200 + {"data": {}}（data 是 dict 但缺 movie_providers key）→ MetatubeProtocolError
+        （不可靜默回 {} 假裝「connected, 0 providers」；spec：/v1/providers 畸形應 fail connect）"""
+        client = make_client()
+        client._session.get = MagicMock(
+            return_value=make_json_response({"data": {}}, status_code=200)
+        )
+        with pytest.raises(MetatubeProtocolError):
+            client.list_providers()
+
+    def test_get_info_data_is_list_raises_protocol_error(self):
+        """200 + {"data": []}（get_info data 非 dict/None）→ MetatubeProtocolError"""
+        client = make_client()
+        client._session.get = MagicMock(
+            return_value=make_json_response({"data": []}, status_code=200)
+        )
+        with pytest.raises(MetatubeProtocolError):
+            client.get_info("FANZA", "1stars00141")
+
+    def test_search_data_is_dict_raises_protocol_error(self):
+        """200 + {"data": {"x": 1}}（search data 非 list/None）→ MetatubeProtocolError"""
+        client = make_client()
+        client._session.get = MagicMock(
+            return_value=make_json_response({"data": {"x": 1}}, status_code=200)
+        )
+        with pytest.raises(MetatubeProtocolError):
+            client.search("FANZA", "ssis-001")
+
+
+# ============================================================
+# TC-6: movie_id URL quoting in get_info
+# ============================================================
+
 class TestMovieIdQuoting:
 
     def _get_called_url(self, client: MetatubeHttpClient) -> str:

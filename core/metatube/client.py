@@ -84,7 +84,23 @@ class MetatubeHttpClient:
         data = self._get_data("/v1/providers", params=None)
         if data is None:
             return {}
-        return data.get("movie_providers", {})
+        if not isinstance(data, dict):
+            raise MetatubeProtocolError(
+                f"list_providers: expected 'data' to be a JSON object, "
+                f"got {type(data).__name__} instead."
+            )
+        if "movie_providers" not in data:
+            raise MetatubeProtocolError(
+                "list_providers: response 'data' missing required 'movie_providers' key. "
+                f"data keys: {list(data.keys())}"
+            )
+        movie_providers = data["movie_providers"]
+        if not isinstance(movie_providers, dict):
+            raise MetatubeProtocolError(
+                f"list_providers: expected 'movie_providers' to be a JSON object, "
+                f"got {type(movie_providers).__name__} instead."
+            )
+        return movie_providers
 
     def get_info(self, provider: str, movie_id: str, lazy: bool = True) -> dict | None:
         """
@@ -101,7 +117,13 @@ class MetatubeHttpClient:
         encoded_id = urllib.parse.quote(movie_id, safe="")
         path = f"/v1/movies/{provider}/{encoded_id}"
         params = {"lazy": "true" if lazy else "false"}
-        return self._get_data(path, params=params)
+        data = self._get_data(path, params=params)
+        if data is not None and not isinstance(data, dict):
+            raise MetatubeProtocolError(
+                f"get_info: expected 'data' to be a JSON object or null, "
+                f"got {type(data).__name__} instead."
+            )
+        return data
 
     def search(self, provider: str, q: str) -> list:
         """
@@ -116,6 +138,11 @@ class MetatubeHttpClient:
         data = self._get_data("/v1/movies/search", params=params)
         if data is None:
             return []
+        if not isinstance(data, list):
+            raise MetatubeProtocolError(
+                f"search: expected 'data' to be a JSON array or null, "
+                f"got {type(data).__name__} instead."
+            )
         return data
 
     # ------------------------------------------------------------------
@@ -169,6 +196,13 @@ class MetatubeHttpClient:
             raise MetatubeProtocolError(
                 f"Invalid JSON from {url}: {exc}"
             ) from exc
+
+        # Envelope must be a JSON object (dict); list/scalar bodies are protocol errors
+        if not isinstance(body, dict):
+            raise MetatubeProtocolError(
+                f"Response from {url} is not a JSON object (got {type(body).__name__}). "
+                f"Expected {{\"data\": ...}} envelope."
+            )
 
         # Check envelope — 'data' key must exist (value may be None)
         sentinel = _SENTINEL

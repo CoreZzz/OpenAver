@@ -9,7 +9,7 @@ get_builtin_sources 預設清單、validate_source_id 啟動 validator，作為
 - 僅 import core/scrapers/utils.py 的純常數（無 circular import 風險）。
 - Logger 一律 from core.logger import get_logger（CLAUDE.md Logger 規則）。
 """
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 from core.logger import get_logger
 from core.scrapers.utils import (
@@ -46,6 +46,19 @@ class SourceConfig(BaseModel):
     is_beta: bool = False
     manual_only: bool = False  # B1 day-one schema（預留 B4 javlibrary）；B1 全 False
     requires_proxy: bool = False  # CD-63a-3：DMM=True，metatube 全 False
+
+    @model_validator(mode='after')
+    def _derive_requires_proxy(self) -> 'SourceConfig':
+        """Builtin sources always derive requires_proxy from PROXY_SOURCES.
+
+        Ensures that even when reconstructed from a stored dict that lacks the
+        requires_proxy key (e.g. old config.json entries), DMM and other proxy
+        builtins correctly reflect True.  Non-builtin types (metatube, etc.) are
+        left unchanged — they keep whatever value was passed (default False).
+        """
+        if self.type == 'builtin':
+            self.requires_proxy = self.id in PROXY_SOURCES
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property

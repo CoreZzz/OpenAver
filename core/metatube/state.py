@@ -47,9 +47,11 @@ class MetatubeConnectionState:
     def connect(self, base_url: str, token: str, provider_names: list[str]) -> None:
         """Mark as connected and bulk-set all named providers to available.
 
-        Repeated connect resets: existing keys are overwritten to True for
-        providers in `provider_names`.  Keys for providers NOT in the new list
-        are left as-is (probe 63a-5 will downgrade them; disconnect bulk-clears).
+        Repeated connect rebuilds availability from scratch: _availability is
+        cleared first, then bulk-set to True for all providers in
+        `provider_names`.  Stale keys from a previous connection to a different
+        server are removed, preventing phantom-available providers from being
+        routed to a server that no longer serves them.
 
         Args:
             base_url: Base URL of the metatube HTTP server (e.g. 'http://host:8080').
@@ -58,6 +60,7 @@ class MetatubeConnectionState:
                             (e.g. ['FANZA', 'HEYZO']).
         """
         with self._lock:
+            self._availability = {}  # clear stale keys before rebuilding
             self.connected = True
             self.base_url = base_url
             self.token = token

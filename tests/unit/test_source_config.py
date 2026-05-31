@@ -365,3 +365,43 @@ def test_is_censored_builder_heyzo_false():
     """build_metatube_sources(['HEYZO']) → HEYZO.is_censored is False"""
     sources = build_metatube_sources(['HEYZO'])
     assert sources[0].is_censored is False
+
+
+# ---------------------------------------------------------------------------
+# G. requires_proxy derives on reconstruct from stored dict（Fix 1 / P1a）
+# ---------------------------------------------------------------------------
+
+def test_requires_proxy_derives_on_reconstruct_from_stored_dict_dmm():
+    """舊 dict（無 requires_proxy key）重建 → builtin dmm 應 derive True"""
+    old_dict = {
+        'id': 'dmm',
+        'type': 'builtin',
+        'display_name_key': 'DMM',
+        # 故意不含 requires_proxy key（模擬舊 config.json 存的 entry）
+    }
+    s = SourceConfig(**old_dict)
+    assert s.requires_proxy is True
+
+
+def test_requires_proxy_derives_on_reconstruct_from_stored_dict_javbus():
+    """舊 dict（無 requires_proxy key）重建 → builtin javbus 應 derive False"""
+    old_dict = {
+        'id': 'javbus',
+        'type': 'builtin',
+        'display_name_key': 'JavBus',
+        # 故意不含 requires_proxy key
+    }
+    s = SourceConfig(**old_dict)
+    assert s.requires_proxy is False
+
+
+def test_requires_proxy_metatube_explicit_false_not_derived():
+    """metatube source 傳 requires_proxy=False 不被 derive 邏輯影響（type != builtin）"""
+    s = SourceConfig(
+        id='metatube:FANZA',
+        type='metatube',
+        display_name_raw='FANZA',
+        requires_proxy=False,
+        config={'censored_type': 'censored'},
+    )
+    assert s.requires_proxy is False
