@@ -234,6 +234,7 @@
       "mt_probe_hint_reason2": "該來源需登入或有反爬機制（如 SOD，換 IP 也無效）。",
       "mt_probe_hint_reason3": "該來源的 metatube scraper 已隨網站改版失效（如 JAV321 / KIN8，與你的環境無關）。",
       "mt_promote_unavailable_warning": "此來源目前測不到，已加入主力集但可能抓不到資料",
+      "mt_probe_failed_pill_hint": "此來源目前測不到，加入後可能抓不到資料，可先點「重新測試」確認",
       "dmm_proxy_required_hint": "DMM 需要 proxy 才能使用，請先在設定中開啟代理",
       "disabled_footnote": "⚠️ 停用 ≠ 完全不被呼叫。Fuzzy 鏈（DMM / JavBus / JavDB / Jav321）、無碼 fallback（FC2 / HEYZO / 日期番號）、進階搜尋單選覆寫屬 always-on，仍會觸發已停用來源。例外：JavBus variant probe 由 Active Row 啟用身份把關，JavBus 停用時跳過。"
     },
