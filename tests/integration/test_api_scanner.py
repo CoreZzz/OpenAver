@@ -525,8 +525,8 @@ class TestMissingCheckAPI:
         db_path = tmp_path / "test.db"
         init_db(db_path)
         repo = VideoRepository(db_path)
-        for v in videos:
-            repo.upsert(v)
+        # 單一 transaction 批次插入（避免 5000 筆各開一次交易拖慢測試）
+        repo.upsert_batch(videos)
         return db_path
 
     def test_db_not_exist_returns_zero(self, client, tmp_path, monkeypatch):

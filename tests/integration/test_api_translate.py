@@ -1,6 +1,7 @@
 """
 翻譯 API 日文跳過邏輯測試
 """
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock
@@ -44,17 +45,23 @@ class TestTranslateSkipNonJapanese:
         assert data.get("success") is True  # 新增
         assert data.get("reason") == "no_japanese"
 
+    @patch("web.routers.translate.httpx.AsyncClient")
     @patch("web.routers.translate.load_config")
-    def test_not_skip_optimize_mode(self, mock_config):
+    def test_not_skip_optimize_mode(self, mock_config, mock_async_client):
         """optimize 模式不應跳過"""
         mock_config.return_value = {"translate": {"enabled": True, "ollama": {"url": "http://localhost:11434", "model": "test"}}}
 
-        # optimize 模式應該繼續執行（雖然可能失敗因為沒有 Ollama）
+        # Mock 掉 Ollama HTTP 呼叫，立即拋 ConnectError，避免空等 60 秒 timeout。
+        # 本測試只驗「optimize 模式不被 skip」，不在意翻譯實際結果。
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=httpx.ConnectError("no ollama"))
+        mock_async_client.return_value.__aenter__.return_value = mock_client
+
         response = client.post("/api/translate", json={
             "text": "中文標題",
             "mode": "optimize"
         })
-        # 不應返回 skipped
+        # 不應返回 skipped（即使後端因無 Ollama 而失敗，也不能是 skipped）
         data = response.json()
         assert data.get("skipped") is not True
 
