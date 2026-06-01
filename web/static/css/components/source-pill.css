@@ -177,10 +177,17 @@
 
 /* Probe-failed Parts Bin pill (CD-63b-4 US9): dimmed but still clickable (promote-with-warning).
    Mirror: .source-pill.dragging opacity 0.5 (L131) and .source-pill:disabled opacity 0.45 (L202).
-   63d-3: warn-color accent signals probe failure; cursor kept default (pill is still promotable). */
+   63d-3 / Codex P3: warn signal must be a *visible* property — Parts Bin pills are always
+   data-enabled="false", and --pill-accent is only consumed under [data-enabled="true"] (L49-50),
+   so an accent override here is a no-op. Drive border-color + slash icon directly with --color-warning.
+   cursor kept default (pill is still promotable — contrast DMM not-allowed below). */
 .source-pill.is-partsbin[data-available="false"] {
     opacity: 0.5;
-    --pill-accent: color-mix(in oklch, var(--color-warning) 85%, var(--accent));
+    border-color: color-mix(in oklch, var(--color-warning) 55%, transparent);
+}
+
+.source-pill.is-partsbin[data-available="false"] .slash-icn {
+    color: var(--color-warning);
 }
 
 /* 63c-6: DMM requires_proxy — proxy 未設定時灰化（兩 surface 共用）。
