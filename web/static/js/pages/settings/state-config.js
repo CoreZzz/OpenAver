@@ -758,12 +758,14 @@ export function stateConfig() {
                 return;
             }
             if (src.manual_only) { this.clickJavLibrary(); return; }
+            // metatube Active Row 點擊 = demote（永遠允許，不論 available；demote 是可逆操作）
+            if (src.type === 'metatube') { this.demoteMetatube(src.id); return; }
+            // disconnect-guard 僅剩 builtin 使用（metatube 已上方 return；保留供未來擴展）
             if (this.isDisconnectedMetatube(src)) {
                 this.clickDisconnectedMetatube(src.display_name);
                 return;
             }
             if (src.type === 'builtin') { this.toggleBuiltin(src.id); return; }
-            if (src.type === 'metatube') { this.demoteMetatube(src.id); return; }
         },
 
         // Builtin：原地翻轉 enabled（膠囊留 Active Row、停用 = inline 刪除線）。

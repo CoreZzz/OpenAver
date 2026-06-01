@@ -146,16 +146,13 @@
     box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 55%, transparent);
 }
 
-/* ─── Disconnected metatube (B3; visual contract present, B1 unexercised) ─── */
-/* Reuse disabled look (gray + strikethrough via data-enabled=false) but no hover
-   lift + default cursor + an `m` corner badge to distinguish from a disabled builtin. */
+/* ─── Disconnected metatube (unavailable / probe 失敗，測不到) ─── */
+/* Reuse disabled look (gray + strikethrough via data-enabled=false). Still clickable
+   to demote (可逆操作) — cursor pointer reflects this; hover lift is intentionally
+   kept (not suppressed) to match clickable semantics. `m` corner badge distinguishes
+   from a disabled builtin. */
 .source-pill.is-disconnected {
-    cursor: default;
-}
-
-.source-pill.is-disconnected:hover {
-    transform: none;
-    box-shadow: none;
+    cursor: pointer;
 }
 
 .source-pill-mt-badge {
