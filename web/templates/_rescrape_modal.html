@@ -17,7 +17,8 @@
 
     {# ───────── 步驟 1：pick（番號 + 來源 pill，各入口共用） ───────── #}
     <div x-show="rescrapeStep === 'pick'">
-      <h3 class="fluent-modal-title"><i class="bi bi-gear"></i> {{ t('showcase.rescrape.modal_title') }}</h3>
+      {# 標題依入口切換（US-A2）：搜尋框入口=「進階搜尋」，其餘重刮入口=「進階重新刮削」 #}
+      <h3 class="fluent-modal-title"><i class="bi bi-gear"></i> <span x-text="rescrapeEntryPoint === 'search' ? t('showcase.rescrape.search_title') : t('showcase.rescrape.modal_title')"></span></h3>
 
       <div class="rescrape-section">
         <label class="rescrape-label">{{ t('showcase.rescrape.number_label') }}</label>

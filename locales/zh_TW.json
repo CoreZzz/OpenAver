@@ -656,6 +656,7 @@
     "page_title": "影片瀏覽",
     "rescrape": {
       "modal_title": "進階重新刮削",
+      "search_title": "進階搜尋",
       "entry_tooltip": "進階重新刮削",
       "number_label": "番號",
       "filename_hint": "原檔名",
