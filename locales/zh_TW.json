@@ -855,7 +855,7 @@
       "up_to_date": "已是最新版本",
       "ai_instruction": "貼給 AI agent 就能操作 OpenAver",
       "ai_hint_unsupported": "不適用網頁版聊天",
-      "ai_tools": "貼給 AI agent 就能操作 OpenAver — Claude Code · Cursor · Codex 等"
+      "ai_tools": "支援：Claude Code · Cursor · Codex 等 AI agent"
     },
     "workflow": {
       "title": "第一次使用？先看這 3 步",
@@ -904,7 +904,10 @@
       "grid_lightbox": "<strong>Lightbox</strong>：全螢幕檢視封面，<kbd class=\"kbd kbd-sm\">←</kbd> <kbd class=\"kbd kbd-sm\">→</kbd> 鍵導航，<kbd class=\"kbd kbd-sm\">Esc</kbd> 關閉",
       "grid_detail": "Lightbox 顯示導演、片長、系列、Label 等詳細資訊（有資料時才會出現）",
       "grid_gallery": "點擊「劇照」按鈕可開啟劇照瀏覽，支援鍵盤 <kbd class=\"kbd kbd-sm\">←</kbd> <kbd class=\"kbd kbd-sm\">→</kbd> 切換和觸控滑動",
-      "badge_keywords": "檔名含 <code>-4k</code>、<code>-uc</code> 等關鍵字時，結果卡片自動顯示彩色 badge"
+      "badge_keywords": "檔名含 <code>-4k</code>、<code>-uc</code> 等關鍵字時，結果卡片自動顯示彩色 badge",
+      "h6_advanced_picker": "進階搜尋 Picker（Beta）",
+      "picker_longpress": "長壓搜尋鈕可挑選單一來源搜尋（Beta，需在 Settings › 進階開啟）",
+      "picker_panel_switch": "結果面板中 🔄 長壓可切換來源"
     },
     "batch": {
       "title": "批次檔案搜尋",
@@ -1050,10 +1053,9 @@
       "title": "Scraper 來源說明",
       "h6_censored": "有碼來源",
       "h6_uncensored": "無碼來源",
-      "h6_default_source": "預設搜尋來源",
+      "h6_default_source": "來源啟停與排序",
       "h6_dmm_fuzzy": "DMM 模糊搜尋",
       "h6_proxy_direct": "Proxy direct 模式",
-      "h6_metatube": "Metatube 並行搜尋",
       "h6_toggle": "切換模式",
       "h6_format": "番號格式範例",
       "censored_dmm": "<strong>DMM</strong>：需設定日本 IP Proxy（<strong>設定頁</strong> → Proxy 欄位）",
@@ -1062,17 +1064,34 @@
       "uncensored_heyzo": "<strong>HEYZO</strong>：獨立來源",
       "uncensored_fc2": "<strong>FC2</strong>：FC2-PPV 專用",
       "uncensored_avsox": "<strong>AVSOX</strong>：無碼通用來源",
-      "default_source_set": "在設定頁可將 <strong>JavBus</strong> 或 <strong>DMM</strong> 設為主要搜尋來源",
-      "default_source_effect": "選為主來源後，精確番號搜尋會優先使用該來源的資料",
+      "default_source_set": "在「<strong>掃描來源</strong>」拖曳調整順序，系統依序使用最前面可用的來源",
+      "default_source_effect": "關閉特定來源的 toggle，可暫時停用該來源而不刪除設定",
       "dmm_fuzzy_trigger": "在搜尋框輸入日文女優名或片商名時，會同時觸發 DMM 模糊搜尋",
       "dmm_fuzzy_prereq": "前提：DMM 已啟用（需設定 Proxy 或使用 <code>direct</code> 模式）",
       "proxy_direct_vpn": "如果您已連接日本 VPN 或本身位於日本，不需要另外設定 Proxy",
       "proxy_direct_how": "只要在設定頁的 Proxy 欄位輸入 <code>direct</code>，即可直接啟用 DMM 功能",
-      "metatube_sqlite_hint": "若並行搜尋多個 metatube 來源時速度較慢，可在 metatube server 端改用 PostgreSQL 取代預設的 SQLite（屬 metatube server 設定，非 OpenAver 設定）",
       "toggle_uncensored": "在<strong>設定頁</strong>開啟「無碼模式」toggle，搜尋時將優先使用無碼來源",
       "col_source": "來源",
       "col_format": "格式",
       "col_example": "範例"
+    },
+    "metatube": {
+      "title": "Metatube 教學",
+      "h6_what": "metatube 是什麼",
+      "what_desc": "metatube 是自架 HTTP server，連接後可一次解鎖 30+ 上游 provider（適合 power user / docker 環境）",
+      "h6_enable": "啟用步驟",
+      "enable_gate": "Settings ›「搜尋與刮削」開啟 Metatube gate toggle → 連線區展開",
+      "enable_url": "填入 Server URL（如 http://你的-metatube:8080）+ 可選 Bearer token → 點 [連線]",
+      "h6_sources": "來源管理",
+      "sources_promote": "30+ provider 落入 Parts Bin，手動 promote 想要的進主力集（上限 10 個）",
+      "sources_offline": "連不上的來源自動灰化，可點 [重新測試] 重新檢查連線",
+      "h6_lan": "LAN 自架注意",
+      "lan_ssrf": "自架於 LAN 的 server 需在設定頁勾選 opt-in（SSRF 安全提醒）",
+      "h6_limits": "來源限制",
+      "limits_picker": "picker 中 metatube 來源不支援女優 / 關鍵字搜尋，建議輸入完整番號",
+      "h6_db": "效能提示",
+      "db_hint": "並行搜尋多個 metatube 來源時速度較慢，可在 metatube server 端改用 PostgreSQL 取代預設的 SQLite（屬 metatube server 設定，非 OpenAver 設定）",
+      "crossref_picker": "用進階搜尋 picker 挑 metatube 單一來源 → 見「搜尋功能」卡"
     },
     "troubleshooting": {
       "title": "疑難排解",

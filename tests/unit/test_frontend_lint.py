@@ -7111,7 +7111,7 @@ class TestHelpPageGuard:
         html = (PROJECT_ROOT / 'web/templates/help.html').read_text(encoding='utf-8')
         zh = self._zh_tw()
         for html_key, json_path, expected_text in [
-            ('help.scraper.h6_default_source', ['help', 'scraper', 'h6_default_source'], '預設搜尋來源'),
+            ('help.scraper.h6_default_source', ['help', 'scraper', 'h6_default_source'], '排序'),
             ('help.scraper.h6_dmm_fuzzy', ['help', 'scraper', 'h6_dmm_fuzzy'], '模糊搜尋'),
             ('help.showcase.other_lightbox_detail', ['help', 'showcase', 'other_lightbox_detail'], '導演'),
             ('help.showcase.other_gallery', ['help', 'showcase', 'other_gallery'], '劇照'),
@@ -9374,17 +9374,19 @@ class TestMetatube63c7I18nGuard:
         assert v, "63c-7 違規：缺 settings.sources.dmm_proxy_required_hint"
 
     def test_help_metatube_sqlite_keys_exist(self):
-        """Help §7.6 SQLite 寫鎖 hint（h6 + 內文）存在且非空。"""
-        scraper = self._zh().get("help", {}).get("scraper", {})
-        assert scraper.get("h6_metatube"), "63c-7 違規：缺 help.scraper.h6_metatube"
-        assert scraper.get("metatube_sqlite_hint"), "63c-7 違規：缺 help.scraper.metatube_sqlite_hint"
+        """Help metatube 教學卡 key（title + db_hint + enable_url）存在且非空。"""
+        metatube = self._zh().get("help", {}).get("metatube", {})
+        assert metatube.get("title"), "64c-1 違規：缺 help.metatube.title"
+        assert metatube.get("db_hint"), "64c-1 違規：缺 help.metatube.db_hint（SQLite 提示）"
+        assert metatube.get("enable_url"), "64c-1 違規：缺 help.metatube.enable_url"
 
     def test_help_html_references_metatube_hint(self):
-        """help.html 引用 h6_metatube + metatube_sqlite_hint（非孤兒 key）。"""
+        """help.html 引用 help.metatube.title + help.metatube.db_hint（非孤兒 key）；舊孤兒 key 不存在。"""
         html = self.HELP_HTML.read_text(encoding="utf-8")
-        assert "help.scraper.h6_metatube" in html, "63c-7 違規：help.html 未引用 h6_metatube"
-        assert "help.scraper.metatube_sqlite_hint" in html, (
-            "63c-7 違規：help.html 未引用 metatube_sqlite_hint"
+        assert "help.metatube.title" in html, "64c-1 違規：help.html 未引用 help.metatube.title"
+        assert "help.metatube.db_hint" in html, "64c-1 違規：help.html 未引用 help.metatube.db_hint"
+        assert "help.scraper.h6_metatube" not in html, (
+            "64c-1 違規：help.html 仍含孤兒 key help.scraper.h6_metatube"
         )
 
 
