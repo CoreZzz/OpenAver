@@ -1,1197 +1,601 @@
 {% extends "base.html" %}
 
 {#
-  Settings Mock — Visual POC (feature/61-settings-ia-sources, task 61b-1).
+  Settings Mock — Visual POC (feature/64-settings-help-ux-polish, TASK-64b-0).
 
-  v2 (canonical): the three-candidate framing (B1/B2/B3, C1/C2/C3) is gone.
-  This page shows ONE locked direction in three sections:
-    A. Tab IA — 6-tab top nav, sources tab is the demo target.
-    B. 掃描來源 — single canonical pill design (Minimal + slash-icon disabled).
-    C. Metatube — same pill design rendered across three connection states
-       (未啟用 / 已啟用未連線 / 已連線), switched via a POC mock control.
+  Shows the NEW single-column Settings IA, built on the REAL settings.css /
+  source-pill.css classes (root id="settings-components") so it reads exactly
+  like the production page. Direction (user-locked 2026-06-02):
 
-  Not linked from sidebar. Not in capabilities. POC only.
+    • Top header (⚙設定 + 字級/語系/主題) kept as-is — untouched.
+    • OLD-version grouping restored: 搜尋與刮削 / 列表生成 / 系統設定,
+      each with 進階 collapsed INLINE (not a separate tab); 翻譯 lives inside
+      搜尋與刮削 again.
+    • 搜尋與刮削 split into TWO cards (搜尋來源 + 刮削與翻譯) — it now also
+      carries the federation Active Row + Metatube connection, too heavy for one.
+    • NEW: a sticky quick-jump nav (3 entries) that scroll-spies the section.
+    • Metatube connection gated behind an enable toggle (open → expand).
+
+  Mock data only — no config read, no DB write, no real HTTP. Not linked from
+  sidebar. Not in capabilities. Removed in Phase D (TASK-64d-1).
+
+  ⚠️ Connection form uses a NEUTRAL placeholder (http://你的-metatube:8080) and
+  empty token — never a real dev endpoint/token (epic §1.6 local-only rule).
 #}
 
 {% block title %}{{ t('settings.mock.page_title') }} — OpenAver{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="/static/css/pages/settings.css">
 <style>
-    .smock [x-cloak] { display: none !important; }
+    #settings-components [x-cloak] { display: none !important; }
+    #settings-components { max-width: 1080px; margin: 0 auto; }
 
-    /* ─── Page wrapper ────────────────────────────────────────────────── */
-    .smock {
-        max-width: 1180px;
-        margin: 0 auto;
-        padding: 1.75rem 1.5rem 6rem;
-        color: var(--text-primary);
-        font-family: var(--font-body, "Plus Jakarta Sans", sans-serif);
+    /* Sticky header — keeps the real controls + icon quick-jump pinned while
+       scrolling (CD-64-B2: sticky=CSS, scroll-spy=Alpine). */
+    #settings-components .smock-header {
+        position: sticky; top: 0; z-index: 31;
+        /* lift the acrylic blur a touch so content reads behind it */
+        backdrop-filter: blur(16px) saturate(140%);
+        -webkit-backdrop-filter: blur(16px) saturate(140%);
     }
-    @media (min-width: 1024px) { .smock { padding-inline: 2.5rem; } }
 
-    /* ─── Hero banner ─────────────────────────────────────────────────── */
-    .smock-hero {
+    /* Icon-only quick-jump; floating tooltip on hover / focus. */
+    #settings-components .smock-jump { display: flex; align-items: center; gap: 0.3rem; }
+    #settings-components .smock-jump-btn {
         position: relative;
-        padding: 1.75rem 1.85rem;
-        border-radius: var(--fluent-radius-xl);
-        background:
-            radial-gradient(circle at 90% 0%, color-mix(in oklch, var(--accent) 18%, transparent), transparent 55%),
-            linear-gradient(135deg, color-mix(in oklch, var(--accent) 6%, var(--surface-1)) 0%, var(--surface-1) 100%);
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 2.25rem; height: 2.25rem;
+        background: transparent; border: 1px solid transparent;
+        border-radius: var(--fluent-radius-md, 8px);
+        color: var(--text-secondary); cursor: pointer;
+        transition: background var(--fluent-duration-fast, .15s) var(--fluent-ease-standard, ease),
+                    color var(--fluent-duration-fast, .15s) var(--fluent-ease-standard, ease),
+                    border-color var(--fluent-duration-fast, .15s) var(--fluent-ease-standard, ease);
+    }
+    #settings-components .smock-jump-btn i { font-size: 1rem; line-height: 1; pointer-events: none; }
+    /* Floating tooltip */
+    #settings-components .smock-jump-btn span {
+        position: absolute; top: calc(100% + 6px); left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        font-size: 0.78rem; font-weight: 600; line-height: 1;
+        padding: 0.3rem 0.6rem;
+        background: var(--surface-0, #fff);
         border: 1px solid var(--stroke-subtle);
-        box-shadow: var(--fluent-shadow-4);
-        overflow: hidden;
+        border-radius: var(--fluent-radius-md, 8px);
+        box-shadow: var(--fluent-shadow-4, 0 2px 8px rgba(0,0,0,.12));
+        color: var(--text-primary);
+        opacity: 0; visibility: hidden; pointer-events: none;
+        z-index: 50;
+        transition: opacity 0.15s ease, visibility 0.15s ease;
     }
-    .smock-hero::after {
-        content: "";
-        position: absolute; inset: -1px;
-        background: linear-gradient(120deg, transparent 40%, color-mix(in oklch, var(--accent) 8%, transparent) 60%, transparent 80%);
-        pointer-events: none;
-        mix-blend-mode: overlay;
-    }
-    .smock-hero-eyebrow {
-        display: inline-flex; align-items: center; gap: 0.45rem;
-        font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
-        font-size: 0.72rem; font-weight: 700; letter-spacing: 0.22em;
-        text-transform: uppercase;
-        color: var(--accent);
-    }
-    .smock-hero-eyebrow .pulse {
-        width: 6px; height: 6px; border-radius: 999px;
-        background: var(--accent);
-        box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 60%, transparent);
-        animation: smock-pulse 2s infinite cubic-bezier(0.33, 0, 0.67, 1);
-    }
-    @keyframes smock-pulse {
-        0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 60%, transparent); }
-        70%  { box-shadow: 0 0 0 9px transparent; }
-        100% { box-shadow: 0 0 0 0 transparent; }
-    }
-    .smock-hero-title {
-        font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
-        font-size: clamp(1.85rem, 3.2vw, 2.4rem);
-        font-weight: 700; letter-spacing: -0.015em; line-height: 1.1;
-        margin: 0.65rem 0 0.5rem;
-    }
-    .smock-hero-title em {
-        font-style: normal;
-        background: linear-gradient(90deg, var(--accent), color-mix(in oklch, var(--accent) 60%, var(--color-warning, #f59e0b)));
-        -webkit-background-clip: text; background-clip: text;
-        color: transparent;
-    }
-    .smock-hero-sub { max-width: 64ch; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.55; margin: 0; }
-    .smock-hero-meta { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.1rem; }
-    .smock-tag {
-        display: inline-flex; align-items: center; gap: 0.35rem;
-        padding: 0.28rem 0.65rem;
-        font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
-        border-radius: 999px;
-        background: color-mix(in oklch, var(--surface-2) 70%, transparent);
-        border: 1px solid var(--stroke-subtle);
-        color: var(--text-secondary);
-    }
-    .smock-tag.warn {
-        color: var(--color-warning);
-        background: color-mix(in oklch, var(--color-warning) 12%, transparent);
-        border-color: color-mix(in oklch, var(--color-warning) 35%, transparent);
-    }
-
-    /* ─── Sticky anchor nav ───────────────────────────────────────────── */
-    .smock-anchor {
-        position: sticky; top: 0; z-index: 30;
-        margin: 1.5rem 0 2rem;
-        padding: 0.5rem;
-        background: color-mix(in oklch, var(--surface-0) 80%, transparent);
-        backdrop-filter: blur(12px) saturate(160%);
-        -webkit-backdrop-filter: blur(12px) saturate(160%);
-        border: 1px solid var(--stroke-subtle);
-        border-radius: var(--fluent-radius-xl);
-        box-shadow: var(--fluent-shadow-2);
-        display: flex; flex-wrap: wrap; gap: 0.35rem;
-    }
-    .smock-anchor a {
-        flex: 1 1 0; min-width: 11rem;
-        display: flex; align-items: center; gap: 0.55rem;
-        padding: 0.55rem 0.85rem;
-        font-size: 0.85rem; font-weight: 500;
-        color: var(--text-secondary); text-decoration: none;
-        border-radius: var(--fluent-radius-lg);
-        border: 1px solid transparent;
-        transition: all var(--fluent-duration-fast) var(--fluent-ease-standard);
-    }
-    .smock-anchor a:hover {
+    #settings-components .smock-jump-btn:hover,
+    #settings-components .smock-jump-btn:focus-visible {
         color: var(--text-primary);
         background: color-mix(in oklch, var(--accent) 8%, transparent);
-        border-color: color-mix(in oklch, var(--accent) 22%, transparent);
     }
-    .smock-anchor .num {
-        font-family: 'Space Grotesk', monospace; font-weight: 700;
-        font-size: 0.78rem;
-        width: 1.5rem; height: 1.5rem;
-        display: inline-grid; place-items: center;
-        border-radius: 999px;
-        background: color-mix(in oklch, var(--accent) 14%, transparent);
+    #settings-components .smock-jump-btn:hover span,
+    #settings-components .smock-jump-btn:focus-visible span {
+        opacity: 1; visibility: visible;
+    }
+    #settings-components .smock-jump-btn.active {
         color: var(--accent);
-    }
-
-    /* ─── Viewpoint section frame ─────────────────────────────────────── */
-    .smock-view { margin-bottom: 2.75rem; scroll-margin-top: 5.5rem; }
-    .smock-view-head { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 1.2rem; }
-    .smock-view-head .marker {
-        flex: 0 0 auto;
-        width: 2.5rem; height: 2.5rem;
-        border-radius: var(--fluent-radius-lg);
-        display: grid; place-items: center;
-        font-family: 'Space Grotesk', monospace; font-weight: 700;
-        background: linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 55%, #000));
-        color: oklch(100% 0 0);
-        box-shadow: var(--fluent-shadow-4);
-    }
-    .smock-view-title {
-        font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
-        font-size: 1.4rem; font-weight: 700; letter-spacing: -0.01em;
-        margin: 0;
-    }
-    .smock-view-goal { margin: 0.2rem 0 0; font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5; max-width: 70ch; }
-
-    /* ─── Canonical card ──────────────────────────────────────────────── */
-    .smock-card {
-        background: var(--surface-0);
-        border: 1px solid var(--stroke-subtle);
-        border-radius: var(--fluent-radius-xl);
-        box-shadow: var(--fluent-shadow-2);
-        overflow: hidden;
-        margin-bottom: 1rem;
-        transition: box-shadow var(--fluent-duration-fast) var(--fluent-ease-standard);
-    }
-    .smock-card:hover { box-shadow: var(--fluent-shadow-8); }
-    .smock-card-head {
-        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-        padding: 0.9rem 1.1rem;
-        border-bottom: 1px solid var(--stroke-subtle);
-        background: color-mix(in oklch, var(--surface-1) 50%, transparent);
-    }
-    .smock-card-head h4 { margin: 0; font-family: 'Space Grotesk', sans-serif; font-size: 0.92rem; font-weight: 600; letter-spacing: 0.01em; }
-    .smock-card-head .label {
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.68rem; letter-spacing: 0.15em; text-transform: uppercase;
-        color: var(--text-muted, var(--text-secondary));
-        padding: 0.18rem 0.5rem;
-        border-radius: var(--fluent-radius-sm);
-        background: color-mix(in oklch, var(--surface-2) 70%, transparent);
-    }
-    .smock-card-body { padding: 1.1rem 1.15rem 1.25rem; }
-
-    /* ─── Tab bar (motion_lab pattern, slightly heavier for settings) ─── */
-    .smock-tabbar {
-        display: flex; flex-wrap: wrap; gap: 0.3rem;
-        padding: 0.4rem;
-        background: color-mix(in oklch, var(--surface-1) 75%, transparent);
-        border: 1px solid var(--stroke-subtle);
-        border-radius: var(--fluent-radius-lg);
-        margin-bottom: 1.25rem;
-    }
-    .smock-tab {
-        flex: 1 1 auto; min-width: 7.5rem;
-        display: inline-flex; align-items: center; justify-content: center;
-        gap: 0.45rem;
-        padding: 0.55rem 0.85rem;
-        font-size: 0.85rem; font-weight: 500;
-        color: var(--text-secondary);
-        border: 1px solid transparent;
-        border-radius: var(--fluent-radius-md);
-        background: transparent;
-        cursor: pointer;
-        transition: all var(--fluent-duration-fast) var(--fluent-ease-standard);
-    }
-    .smock-tab i { font-size: 0.95rem; opacity: 0.7; }
-    .smock-tab:hover:not(.active) { color: var(--text-primary); background: color-mix(in oklch, var(--surface-2) 70%, transparent); }
-    .smock-tab.active {
-        background: var(--surface-0);
-        color: var(--text-primary);
-        border-color: var(--stroke-default, var(--stroke-subtle));
-        box-shadow: var(--fluent-shadow-2);
-    }
-    .smock-tab.active i { opacity: 1; color: var(--accent); }
-
-    .smock-tabpanel { padding: 0.25rem 0.1rem; animation: smock-fade var(--fluent-duration-medium) var(--fluent-ease-decel); }
-    @keyframes smock-fade {
-        from { opacity: 0; transform: translateY(4px); }
-        to   { opacity: 1; transform: translateY(0); }
-    }
-    .smock-tabpanel-empty {
-        padding: 2.5rem 1rem; text-align: center;
-        color: var(--text-secondary);
-        background: color-mix(in oklch, var(--surface-1) 40%, transparent);
-        border: 1px dashed var(--stroke-subtle);
-        border-radius: var(--fluent-radius-lg);
-        font-size: 0.88rem;
-    }
-    .smock-tabpanel-empty i { font-size: 1.6rem; opacity: 0.5; display: block; margin-bottom: 0.4rem; }
-
-    /* ─── Batch operations bar ────────────────────────────────────────── */
-    .smock-batchbar {
-        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-        padding: 0.75rem 0.95rem;
-        background: color-mix(in oklch, var(--surface-1) 55%, transparent);
-        border: 1px solid var(--stroke-subtle);
-        border-radius: var(--fluent-radius-lg);
-        margin-bottom: 1rem;
-        flex-wrap: wrap;
-    }
-    .smock-batchbar-left { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-    .smock-batchbar-right { display: flex; align-items: center; gap: 0.5rem; }
-    .smock-counter {
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.82rem;
-        color: var(--text-secondary);
-        font-variant-numeric: tabular-nums;  /* prevent digit-width jitter on toggle */
-        display: inline-flex; align-items: baseline; gap: 0.3rem;
-    }
-    .smock-counter strong { color: var(--text-primary); font-weight: 700; }
-    .smock-counter .cap-divider { color: var(--text-muted, var(--text-secondary)); opacity: 0.6; }
-    .smock-counter .cap-value { color: var(--text-muted, var(--text-secondary)); font-weight: 500; }
-    .smock-counter .cap-tag {
-        margin-left: 0.4rem;
-        font-size: 0.62rem; letter-spacing: 0.16em; text-transform: uppercase;
-        color: var(--text-muted, var(--text-secondary));
-        padding: 0.1rem 0.4rem;
-        border-radius: var(--fluent-radius-sm);
-        background: color-mix(in oklch, var(--surface-2) 60%, transparent);
-    }
-
-    /* Fluent-style switch toggle (uncensored mode) */
-    .smock-switch {
-        display: inline-flex; align-items: center; gap: 0.6rem;
-        cursor: pointer; user-select: none;
-        padding: 0.25rem 0.45rem 0.25rem 0.3rem;
-        border-radius: 999px;
-        transition: background var(--fluent-duration-fast) var(--fluent-ease-standard);
-    }
-    .smock-switch:hover { background: color-mix(in oklch, var(--surface-2) 60%, transparent); }
-    .smock-switch input { position: absolute; opacity: 0; pointer-events: none; }
-    .smock-switch .track {
-        position: relative;
-        width: 38px; height: 22px;
-        border-radius: 999px;
-        background: color-mix(in oklch, var(--text-secondary) 22%, transparent);
-        border: 1px solid var(--stroke-subtle);
-        transition: background var(--fluent-duration-fast) var(--fluent-ease-standard), border-color var(--fluent-duration-fast) var(--fluent-ease-standard);
-        flex: 0 0 auto;
-    }
-    .smock-switch .thumb {
-        position: absolute; top: 2px; left: 2px;
-        width: 16px; height: 16px;
-        border-radius: 999px;
-        background: var(--surface-0);
-        box-shadow: var(--fluent-shadow-2);
-        transition: transform var(--fluent-duration-fast) var(--fluent-ease-decel), background var(--fluent-duration-fast) var(--fluent-ease-standard);
-    }
-    .smock-switch input:checked + .track {
-        background: var(--accent);
-        border-color: var(--accent);
-    }
-    .smock-switch input:checked + .track .thumb { transform: translateX(16px); background: oklch(100% 0 0); }
-    .smock-switch input:focus-visible + .track { box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 35%, transparent); }
-    .smock-switch .lbl { font-size: 0.88rem; font-weight: 600; color: var(--text-primary); }
-    .smock-switch .lbl small {
-        display: block; font-size: 0.7rem; font-weight: 400;
-        color: var(--text-secondary); line-height: 1.2; margin-top: 1px;
-    }
-
-    .smock-mini-btn {
-        font-size: 0.78rem;
-        padding: 0.35rem 0.7rem;
-        border-radius: var(--fluent-radius-md);
-        border: 1px solid var(--stroke-subtle);
-        background: var(--surface-0);
-        color: var(--text-secondary);
-        cursor: pointer;
-        transition: all var(--fluent-duration-fast) var(--fluent-ease-standard);
-        display: inline-flex; align-items: center; gap: 0.35rem;
-    }
-    .smock-mini-btn:hover { background: color-mix(in oklch, var(--surface-2) 70%, transparent); color: var(--text-primary); }
-    .smock-mini-btn.ghost {
-        background: transparent;
-        border-style: dashed;
-        opacity: 0.7;
-        font-size: 0.72rem;
-    }
-    .smock-mini-btn.ghost:hover { opacity: 1; }
-
-    /* ─── Group header ────────────────────────────────────────────────── */
-    .smock-group-count {
-        margin-left: auto;
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.72rem;
-        color: var(--text-muted, var(--text-secondary));
-        padding: 0.15rem 0.45rem;
-        border-radius: 999px;
-        background: color-mix(in oklch, var(--surface-2) 60%, transparent);
-    }
-
-    /* ─── Canonical source pill (Minimal + slash-icon disabled) ────────── */
-    .smock-pills {
-        display: flex; flex-wrap: wrap;
-        gap: 0.5rem;
-        min-height: 2.5rem;
-    }
-    .smock-pill {
-        --pill-accent: var(--accent);
-        position: relative;
-        display: inline-flex; align-items: center;
-        gap: 0.45rem;
-        padding: 0.4rem 0.85rem;
-        font-size: 0.85rem; font-weight: 500; letter-spacing: 0.01em;
-        border-radius: 999px;
-        border: 1px solid color-mix(in oklch, var(--color-base-content) 18%, transparent);
-        background: color-mix(in oklch, var(--surface-2) 55%, transparent);
-        color: var(--text-primary);
-        cursor: grab;
-        user-select: none;
-        transition:
-            color var(--fluent-duration-fast) var(--fluent-ease-standard),
-            background var(--fluent-duration-fast) var(--fluent-ease-standard),
-            border-color var(--fluent-duration-fast) var(--fluent-ease-standard),
-            transform var(--fluent-duration-fast) var(--fluent-ease-decel),
-            box-shadow var(--fluent-duration-fast) var(--fluent-ease-standard);
-    }
-    .smock-pill:hover { box-shadow: var(--fluent-shadow-2); transform: translateY(-1px); }
-    .smock-pill:active { cursor: grabbing; }
-    .smock-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .smock-pill.dragging { opacity: 0.4; transform: scale(0.96); }
-    .smock-pill.drop-target { box-shadow: 0 0 0 2px var(--accent); }
-
-    /* ENABLED — canonical look */
-    .smock-pill[data-enabled="true"] {
-        background: color-mix(in oklch, var(--pill-accent) 10%, var(--surface-0));
-        border-color: color-mix(in oklch, var(--pill-accent) 45%, transparent);
-        color: var(--text-primary);
-    }
-    /* Uncensored category accent */
-    .smock-pill[data-cat="uncensored"][data-enabled="true"] {
-        --pill-accent: var(--color-success, #34c759);
-    }
-
-    /* DISABLED — slash icon + muted text + dashed border (light supplement) */
-    .smock-pill[data-enabled="false"] {
-        background: color-mix(in oklch, var(--surface-1) 60%, transparent);
-        border-color: color-mix(in oklch, var(--color-base-content) 22%, transparent);
-        border-style: dashed;
-        color: color-mix(in oklch, var(--text-primary) 55%, transparent);
-        /* opacity stays at 1; the slash icon + muted color + dashed border carry the signal */
-    }
-    .smock-pill[data-enabled="false"]:hover {
-        background: color-mix(in oklch, var(--surface-2) 70%, transparent);
-        color: color-mix(in oklch, var(--text-primary) 80%, transparent);
-    }
-    .smock-pill .slash-icn { display: none; font-size: 0.95rem; }
-    .smock-pill[data-enabled="false"] .slash-icn { display: inline-block; color: color-mix(in oklch, var(--text-muted, var(--text-secondary)) 80%, transparent); }
-    .smock-pill[data-enabled="false"] .pill-name {
-        text-decoration: line-through;
-        text-decoration-color: color-mix(in oklch, var(--text-muted, var(--text-secondary)) 35%, transparent);
-        text-decoration-thickness: 1px;
-        text-underline-offset: 2px;
-    }
-
-    /* Metatube provider differentiation (corner `m` + dashed border) */
-    .smock-pill.is-mt {
-        --pill-accent: color-mix(in oklch, var(--accent) 70%, var(--color-warning, #f59e0b));
-    }
-    .smock-pill.is-mt[data-enabled="true"] {
-        border-style: dashed;
-        border-color: color-mix(in oklch, var(--accent) 50%, transparent);
-    }
-    .smock-pill.is-mt::after {
-        content: "m";
-        position: absolute; right: -3px; bottom: -3px;
-        width: 14px; height: 14px;
-        display: grid; place-items: center;
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.62rem; font-weight: 700;
-        background: var(--accent);
-        color: oklch(100% 0 0);
-        border: 2px solid var(--surface-0);
-        border-radius: 999px;
-        line-height: 1;
-    }
-
-    /* Disconnected enabled-metatube (enabled && !available) — EC-9 visual.
-       Renders like a disabled pill (slash + strikethrough + dashed via
-       data-enabled="false") but keeps the `m` badge; differs from disabled
-       builtin only by no-hover-lift + cursor:default + click-toast. */
-    .smock-pill.is-mt.is-disconnected { cursor: default; }
-    .smock-pill.is-mt.is-disconnected:hover {
-        transform: none;
-        box-shadow: none;
-        background: color-mix(in oklch, var(--surface-1) 60%, transparent);
-        color: color-mix(in oklch, var(--text-primary) 55%, transparent);
-    }
-
-    /* ─── Warning banner (full-disabled state, US3 boundary) ──────────── */
-    .smock-warn {
-        display: flex; align-items: center; gap: 0.6rem;
-        padding: 0.65rem 0.9rem;
-        margin-top: 0.9rem;
-        background: color-mix(in oklch, var(--color-warning, #f59e0b) 12%, transparent);
-        border: 1px solid color-mix(in oklch, var(--color-warning, #f59e0b) 35%, transparent);
-        border-radius: var(--fluent-radius-md);
-        color: var(--color-warning, #f59e0b);
-        font-size: 0.82rem;
-        line-height: 1.4;
-    }
-    .smock-warn i { font-size: 1rem; flex: 0 0 auto; }
-
-    /* ─── Metatube state switcher (POC mock) ──────────────────────────── */
-    .smock-state-switch {
-        display: flex; align-items: center; gap: 0.5rem;
-        flex-wrap: wrap;
-        margin-bottom: 1rem;
-        padding: 0.6rem 0.85rem;
-        background: repeating-linear-gradient(
-            -45deg,
-            color-mix(in oklch, var(--accent) 5%, transparent) 0 12px,
-            transparent 12px 24px
-        );
-        border: 1px dashed color-mix(in oklch, var(--accent) 30%, transparent);
-        border-radius: var(--fluent-radius-lg);
-    }
-    .smock-state-switch .label {
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase;
-        color: var(--text-muted, var(--text-secondary));
-        flex: 0 0 auto;
-    }
-    .smock-state-switch .opts { display: inline-flex; gap: 0.25rem; flex-wrap: wrap; }
-    .smock-state-btn {
-        font-size: 0.78rem;
-        padding: 0.32rem 0.7rem;
-        border-radius: 999px;
-        border: 1px solid var(--stroke-subtle);
-        background: var(--surface-0);
-        color: var(--text-secondary);
-        cursor: pointer;
-        transition: all var(--fluent-duration-fast) var(--fluent-ease-standard);
-    }
-    .smock-state-btn:hover { color: var(--text-primary); border-color: var(--stroke-default, var(--stroke-subtle)); }
-    .smock-state-btn.active {
-        background: var(--accent);
-        color: oklch(100% 0 0);
-        border-color: var(--accent);
-        box-shadow: var(--fluent-shadow-2);
-    }
-
-    /* ─── Metatube state renders ──────────────────────────────────────── */
-    /* State 1 (disabled): not shown — handled by x-show, no styles */
-
-    /* State 2 (idle): connection form (URL + token + 連線) */
-    .smock-mt-connect-form {
-        display: flex; flex-direction: column;
-        gap: 0.85rem;
-        padding: 1rem 1.1rem;
-        background: color-mix(in oklch, var(--surface-1) 45%, transparent);
-        border: 1px dashed var(--stroke-subtle);
-        border-radius: var(--fluent-radius-lg);
-    }
-    .smock-mt-field { display: flex; flex-direction: column; gap: 0.3rem; }
-    .smock-mt-field > span {
-        font-size: 0.78rem; font-weight: 600;
-        color: var(--text-secondary);
-        letter-spacing: 0.01em;
-    }
-    .smock-mt-field input {
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.85rem;
-        padding: 0.55rem 0.75rem;
-        color: var(--text-primary);
-        background: var(--surface-0);
-        border: 1px solid var(--stroke-subtle);
-        border-radius: var(--fluent-radius-md);
-        transition: border-color var(--fluent-duration-fast) var(--fluent-ease-standard),
-                    box-shadow var(--fluent-duration-fast) var(--fluent-ease-standard);
-    }
-    .smock-mt-field input:focus-visible {
-        outline: none;
-        border-color: var(--accent);
-        box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
-    }
-    .smock-mt-connect-btn {
-        align-self: flex-start;
-        display: inline-flex; align-items: center; gap: 0.45rem;
-        font-size: 0.85rem; font-weight: 600;
-        padding: 0.5rem 1.1rem;
-        color: oklch(100% 0 0);
-        background: var(--accent);
-        border: 1px solid var(--accent);
-        border-radius: 999px;
-        cursor: pointer;
-        transition: box-shadow var(--fluent-duration-fast) var(--fluent-ease-standard),
-                    transform var(--fluent-duration-fast) var(--fluent-ease-decel);
-    }
-    .smock-mt-connect-btn:hover { box-shadow: var(--fluent-shadow-4); transform: translateY(-1px); }
-    .smock-mt-connect-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-    /* State 3 (connected): status row */
-    .smock-mt-connect-status {
-        display: flex; align-items: center; gap: 0.6rem;
-        flex-wrap: wrap;
-        padding: 0.7rem 0.95rem;
-        margin-bottom: 0.85rem;
-        background: color-mix(in oklch, var(--color-success, #34c759) 8%, var(--surface-1));
-        border: 1px solid color-mix(in oklch, var(--color-success, #34c759) 30%, transparent);
-        border-radius: var(--fluent-radius-md);
-        font-size: 0.85rem;
-        color: var(--text-primary);
-    }
-    .smock-mt-connect-status > i:first-child {
-        color: var(--color-success, #34c759);
-        font-size: 1.1rem; flex: 0 0 auto;
-    }
-    .smock-mt-connect-status .status-text { flex: 1 1 auto; }
-    .smock-mt-connect-status code {
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.78rem;
-        padding: 0.1rem 0.4rem;
-        border-radius: var(--fluent-radius-sm);
-        background: color-mix(in oklch, var(--surface-2) 60%, transparent);
-    }
-
-    /* Debug row (replaces former inline style on 全停用 control) */
-    .smock-debug-row { margin-top: 1.1rem; display: flex; justify-content: flex-end; }
-
-    /* Disconnect toast (fires on click of disconnected metatube pill) */
-    .smock-disconnect-toast {
-        display: flex; align-items: flex-start; gap: 0.6rem;
-        margin-top: 0.85rem;
-        padding: 0.75rem 1rem;
-        background: color-mix(in oklch, var(--accent) 8%, var(--surface-1));
-        border: 1px solid color-mix(in oklch, var(--accent) 28%, transparent);
-        border-radius: var(--fluent-radius-md);
-        color: var(--text-secondary);
-        font-size: 0.83rem;
-        line-height: 1.5;
-    }
-    .smock-disconnect-toast > i { color: var(--accent); font-size: 1rem; margin-top: 1px; flex: 0 0 auto; }
-    .smock-disconnect-toast strong { color: var(--text-primary); }
-    /* ─── Footer note ─────────────────────────────────────────────────── */
-    .smock-foot {
-        margin-top: 3rem;
-        padding: 1rem 1.15rem;
-        font-size: 0.8rem; color: var(--text-secondary);
-        text-align: center;
-        border-top: 1px dashed var(--stroke-subtle);
-    }
-    .smock-foot kbd {
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.72rem;
-        padding: 0.1rem 0.4rem;
-        border: 1px solid var(--stroke-subtle);
-        border-radius: var(--fluent-radius-sm);
-        background: var(--surface-1);
-    }
-
-    /* ═══════════════════════════════════════════════════════════════════
-       v4.2 ADDITIONS — Tier 1 / Tier 2 / Manual-Only / Cap alert
-       Appended after the pre-v4.2 styles so cascade order favors v4.2.
-    ═══════════════════════════════════════════════════════════════════ */
-
-    /* ─── Tier group head (Tier 1 always-expanded / Tier 2 collapsible) ─── */
-    .smock-tier-head {
-        display: flex; align-items: center; gap: 0.6rem;
-        width: 100%;
-        margin: 1.15rem 0 0.7rem;
-        padding: 0.5rem 0.6rem;
-        font-size: 0.83rem; font-weight: 600;
-        color: var(--text-secondary);
-        letter-spacing: 0.01em;
-        background: transparent;
-        border: none;
-        border-radius: var(--fluent-radius-md);
-        text-align: left;
-    }
-    .smock-tier-head > i:first-child {
-        color: var(--text-muted, var(--text-secondary));
-        font-size: 0.85rem;
-        transition: transform var(--fluent-duration-fast) var(--fluent-ease-decel);
-    }
-    .smock-tier-head .tier-tag {
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.62rem; letter-spacing: 0.16em; text-transform: uppercase;
-        color: var(--accent);
-        padding: 0.1rem 0.42rem;
-        margin-left: 0.15rem;
-        border-radius: var(--fluent-radius-sm);
         background: color-mix(in oklch, var(--accent) 12%, transparent);
-    }
-    .smock-tier-head.is-tier2 .tier-tag {
-        color: var(--text-muted, var(--text-secondary));
-        background: color-mix(in oklch, var(--surface-2) 70%, transparent);
-    }
-    .smock-tier-head.is-collapsible {
-        cursor: pointer;
-        font-family: inherit;
-    }
-    .smock-tier-head.is-collapsible:hover {
-        background: color-mix(in oklch, var(--surface-2) 55%, transparent);
-        color: var(--text-primary);
-    }
-    .smock-tier-head.is-collapsible:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 2px;
+        border-color: color-mix(in oklch, var(--accent) 28%, transparent);
     }
 
-    /* ─── JavLibrary BETA pill (Manual-Only, fixed last in Active Row) ─── */
-    .smock-pill.is-manual-only {
-        cursor: default;
-        background: color-mix(in oklch, var(--surface-1) 45%, transparent);
-        border-style: dashed;
-        border-color: color-mix(in oklch, var(--accent) 28%, var(--stroke-subtle));
-        color: var(--text-secondary);
-        padding-right: 0.4rem;
-        gap: 0.55rem;
+    /* Quick-toggle strip (下載劇照 + 進階搜尋 Beta) — standalone row above sections. */
+    #settings-components .smock-quicktoggles {
+        display: flex; flex-wrap: wrap; align-items: center;
+        gap: 0.5rem 2rem;
+        margin: 0.5rem 0 0.75rem;
+        padding: 0.6rem 1rem;
+        background: color-mix(in oklch, var(--surface-1, #f5f5f5) 70%, transparent);
+        border: 1px solid var(--stroke-subtle);
+        border-radius: var(--fluent-radius-lg, 10px);
     }
-    .smock-pill.is-manual-only:hover {
-        box-shadow: none;
-        transform: none;
-        background: color-mix(in oklch, var(--surface-1) 55%, transparent);
+    #settings-components .smock-quicktoggles .settings-label {
+        width: auto; flex: 0 0 auto; margin: 0;
     }
-    .smock-pill.is-manual-only .slash-icn { display: none; }
-    .smock-pill.is-manual-only .pill-name {
-        text-decoration: none;
-        color: var(--text-primary);
+    /* POC notice strip (slim, not a hero — keeps the real header on top) */
+    #settings-components .smock-poc {
+        display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+        margin: 0.25rem 0 1rem; padding: 0.5rem 0.85rem;
+        font-size: 0.76rem; color: var(--text-secondary);
+        background: color-mix(in oklch, var(--color-warning, #f59e0b) 9%, transparent);
+        border: 1px dashed color-mix(in oklch, var(--color-warning, #f59e0b) 35%, transparent);
+        border-radius: var(--fluent-radius-md, 8px);
     }
-
-    /* ─── Inline pill badge (Manual-Only / future generic) ────────────── */
-    .smock-pill-badge {
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.6rem; font-weight: 700;
-        letter-spacing: 0.14em; text-transform: uppercase;
-        padding: 0.18rem 0.5rem;
-        border-radius: 999px;
-        line-height: 1;
-    }
-    .smock-pill-badge.is-manual-only {
-        background: color-mix(in oklch, var(--accent) 16%, transparent);
-        color: var(--accent);
-        border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+    #settings-components .smock-poc i { color: var(--color-warning, #f59e0b); }
+    #settings-components .smock-poc code {
+        font-family: 'Space Grotesk', monospace; font-size: 0.72rem;
+        padding: 0.05rem 0.35rem; border-radius: 4px;
+        background: color-mix(in oklch, var(--surface-2, #eee) 60%, transparent);
     }
 
-    /* ─── Cap-block inline alert ──────────────────────────────────────── */
-    .smock-cap-alert {
-        display: flex; align-items: flex-start; gap: 0.7rem;
-        padding: 0.8rem 1rem;
-        margin-top: 0.85rem;
-        background:
-            linear-gradient(135deg,
-                color-mix(in oklch, var(--color-warning, #f59e0b) 14%, transparent) 0%,
-                color-mix(in oklch, var(--color-warning, #f59e0b) 5%, transparent) 100%);
-        border: 1px solid color-mix(in oklch, var(--color-warning, #f59e0b) 38%, transparent);
-        border-radius: var(--fluent-radius-md);
-        color: var(--text-primary);
-        font-size: 0.85rem;
-        line-height: 1.45;
+    /* Section anchor offset so the sticky nav doesn't cover the heading */
+    #settings-components .smock-section { scroll-margin-top: 4.5rem; }
+
+    /* Inline 進階 collapse (old-version pattern; .collapsible-* dropped from
+       settings.css in the tabs era — re-added here, returns to settings.css in
+       Phase B real impl). */
+    #settings-components .collapsible-trigger {
+        display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+        width: 100%; padding: 0.55rem 0.15rem; margin-top: 0.25rem;
+        background: transparent; border: none; cursor: pointer;
+        color: var(--text-secondary); text-align: left;
     }
-    .smock-cap-alert > i {
-        color: var(--color-warning, #f59e0b);
-        font-size: 1.15rem;
-        margin-top: 1px;
-        flex: 0 0 auto;
+    #settings-components .collapsible-trigger:hover { color: var(--text-primary); }
+    #settings-components .collapsible-trigger .collapsible-title {
+        display: inline-flex; align-items: center; gap: 0.45rem;
+        font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 0.88rem;
     }
-    .smock-cap-alert > div { flex: 1 1 auto; }
-    .smock-cap-alert strong {
-        display: block;
-        font-family: 'Space Grotesk', sans-serif;
-        font-size: 0.85rem; font-weight: 700;
-        margin-bottom: 0.18rem;
-        letter-spacing: 0.01em;
-    }
-    .smock-cap-alert p {
-        margin: 0;
-        color: var(--text-secondary);
-        font-size: 0.8rem;
-    }
-    .smock-cap-alert button {
-        align-self: flex-start;
-        flex: 0 0 auto;
-        font-size: 0.78rem; font-weight: 600;
-        padding: 0.34rem 0.75rem;
-        background: var(--surface-0);
-        border: 1px solid color-mix(in oklch, var(--color-warning, #f59e0b) 38%, transparent);
-        color: var(--color-warning, #f59e0b);
-        border-radius: var(--fluent-radius-md);
-        cursor: pointer;
-        transition:
-            background var(--fluent-duration-fast) var(--fluent-ease-standard),
-            box-shadow var(--fluent-duration-fast) var(--fluent-ease-standard);
-    }
-    .smock-cap-alert button:hover {
-        background: color-mix(in oklch, var(--color-warning, #f59e0b) 12%, var(--surface-0));
-        box-shadow: var(--fluent-shadow-2);
-    }
-    .smock-cap-alert button:focus-visible {
-        outline: 2px solid var(--color-warning, #f59e0b);
-        outline-offset: 2px;
+    #settings-components .collapsible-trigger .collapsible-title i { color: var(--accent); }
+    #settings-components .btn-icon-collapse i { transition: transform var(--fluent-duration-fast, .15s) ease; }
+    #settings-components .btn-icon-collapse i.rotate-180 { transform: rotate(180deg); }
+    #settings-components .collapsible-content { padding-top: 0.25rem; }
+
+    /* Card-header pretitle marker (section number chip) */
+    #settings-components .smock-marker {
+        display: inline-grid; place-items: center;
+        width: 1.4rem; height: 1.4rem; margin-right: 0.5rem;
+        border-radius: 6px; font-family: 'Space Grotesk', monospace; font-weight: 700; font-size: 0.75rem;
+        background: color-mix(in oklch, var(--accent) 16%, transparent); color: var(--accent);
     }
 
-    /* ─── Uncensored-mode off transient hint (Codex P1 / design §EC-2) ── */
-    .smock-uncens-hint {
-        display: flex; align-items: flex-start; gap: 0.55rem;
-        margin: 0.65rem 0 0;
-        padding: 0.55rem 0.75rem;
-        font-size: 0.78rem;
-        line-height: 1.5;
-        color: var(--text-secondary);
-        background: color-mix(in oklch, var(--accent) 6%, transparent);
-        border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent);
-        border-radius: var(--fluent-radius-md);
-    }
-    .smock-uncens-hint > i {
-        color: var(--accent);
-        font-size: 0.95rem;
-        margin-top: 1px;
-        flex: 0 0 auto;
+    /* Metatube enable gate wrapper */
+    #settings-components .smock-mt-gate {
+        margin-top: 0.75rem; padding: 0.75rem 0.85rem;
+        border: 1px solid var(--stroke-subtle); border-radius: var(--fluent-radius-lg, 10px);
+        background: color-mix(in oklch, var(--accent) 4%, transparent);
     }
 
-    /* ─── Tier 2 footnote (editorial small text) ──────────────────────── */
-    .smock-tier2-footnote {
-        margin: 1rem 0 0;
-        padding: 0.6rem 0.85rem;
-        font-size: 0.76rem;
-        line-height: 1.6;
-        color: var(--text-secondary);
-        background: color-mix(in oklch, var(--surface-1) 35%, transparent);
-        border-left: 2px solid color-mix(in oklch, var(--text-muted, var(--text-secondary)) 35%, transparent);
-        border-radius: 0 var(--fluent-radius-sm) var(--fluent-radius-sm) 0;
-    }
-
-    /* ─── Metatube disabled-state OUTSIDE-card explainer ──────────────── */
-    .smock-mt-disabled-explainer {
-        display: flex; align-items: flex-start; gap: 0.8rem;
-        padding: 0.95rem 1.1rem;
-        background:
-            repeating-linear-gradient(
-                -45deg,
-                color-mix(in oklch, var(--text-muted, var(--text-secondary)) 5%, transparent) 0 8px,
-                transparent 8px 16px
-            );
-        border: 1px dashed color-mix(in oklch, var(--text-muted, var(--text-secondary)) 32%, transparent);
-        border-radius: var(--fluent-radius-lg);
-        color: var(--text-secondary);
-        font-size: 0.83rem;
-        line-height: 1.55;
-    }
-    .smock-mt-disabled-explainer > i {
-        color: var(--text-muted, var(--text-secondary));
-        font-size: 1.15rem;
-        margin-top: 1px;
-        flex: 0 0 auto;
-    }
-    .smock-mt-disabled-explainer > div { flex: 1 1 auto; }
-    .smock-mt-disabled-explainer strong {
-        display: inline-block;
-        font-family: 'Space Grotesk', monospace;
-        font-size: 0.66rem; font-weight: 700;
-        letter-spacing: 0.18em; text-transform: uppercase;
-        color: var(--text-muted, var(--text-secondary));
-        margin-right: 0.5rem;
-    }
-
-    /* ─── Metatube connected: Tier hint banner above pills ────────────── */
-    .smock-mt-tier-hint {
-        display: flex; align-items: flex-start; gap: 0.7rem;
-        padding: 0.7rem 0.95rem;
-        margin-bottom: 0.85rem;
-        background: color-mix(in oklch, var(--accent) 6%, var(--surface-1));
-        border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent);
-        border-radius: var(--fluent-radius-md);
-        color: var(--text-secondary);
-        font-size: 0.82rem;
-        line-height: 1.5;
-    }
-    .smock-mt-tier-hint > i {
-        color: var(--accent);
-        font-size: 1rem;
-        margin-top: 1px;
-        flex: 0 0 auto;
-    }
-
-    /* ─── Reduced motion ──────────────────────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
-        .smock-hero-eyebrow .pulse,
-        .smock-tabpanel,
-        .smock-pill,
-        .smock-cap-alert,
-        .smock-tier-head > i:first-child { animation: none !important; transition: none !important; }
+        html { scroll-behavior: auto; }
+        #settings-components .smock-jump-btn span { transition: none; }
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="smock"
-     x-data="settingsMockPage()"
-     x-cloak>
+<div id="settings-components" x-data="settingsMockPage()" x-cloak>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         Hero banner
-    ═══════════════════════════════════════════════════════════════ -->
-    <div class="smock-hero">
-        <div class="smock-hero-eyebrow">
-            <span class="pulse"></span>
-            <span>{{ t('settings.mock.eyebrow') }}</span>
-        </div>
-        <h1 class="smock-hero-title">
-            {{ t('settings.mock.title_prefix') }} <em>{{ t('settings.mock.title_emphasis') }}</em>
-        </h1>
-        <p class="smock-hero-sub">{{ t('settings.mock.subtitle') }}</p>
-        <div class="smock-hero-meta">
-            <span class="smock-tag"><i class="bi bi-git"></i> feature/61-settings-ia-sources</span>
-            <span class="smock-tag"><i class="bi bi-bookmark"></i> task 61b-1 · phase P1 (POC)</span>
-            <span class="smock-tag warn"><i class="bi bi-eye-slash"></i> {{ t('settings.mock.hidden_note') }}</span>
+    <!-- ░░ Sticky header — real controls kept; icon-only quick-jump added inline ░░ -->
+    <div class="settings-header smock-header">
+        <h4 class="mb-0">
+            <i class="bi bi-gear"></i> {{ t('settings.header.title') }}
+        </h4>
+
+        <!-- Quick-jump (icon-only; text reveals on hover / when active) -->
+        <nav class="smock-jump" role="tablist" aria-label="{{ t('settings.header.title') }}">
+            <button type="button" class="smock-jump-btn" role="tab"
+                    :class="{ active: activeSection === 'sec-search' }"
+                    :aria-selected="activeSection === 'sec-search'"
+                    :title="'{{ t('settings.mock.nav_search_scrape') }}'"
+                    @click="scrollToSection('sec-search')">
+                <i class="bi bi-search"></i><span>{{ t('settings.mock.nav_search_scrape') }}</span>
+            </button>
+            <button type="button" class="smock-jump-btn" role="tab"
+                    :class="{ active: activeSection === 'sec-gallery' }"
+                    :aria-selected="activeSection === 'sec-gallery'"
+                    :title="'{{ t('settings.mock.nav_gallery') }}'"
+                    @click="scrollToSection('sec-gallery')">
+                <i class="bi bi-list-ul"></i><span>{{ t('settings.mock.nav_gallery') }}</span>
+            </button>
+            <button type="button" class="smock-jump-btn" role="tab"
+                    :class="{ active: activeSection === 'sec-system' }"
+                    :aria-selected="activeSection === 'sec-system'"
+                    :title="'{{ t('settings.mock.nav_system') }}'"
+                    @click="scrollToSection('sec-system')">
+                <i class="bi bi-sliders"></i><span>{{ t('settings.mock.nav_system') }}</span>
+            </button>
+        </nav>
+
+        <div class="settings-header-actions">
+            <div class="font-size-control">
+                <template x-for="s in ['xs','sm','md','lg','xl']" :key="s">
+                    <button type="button" class="font-size-btn"
+                            :class="{ active: fontSize === s }"
+                            :style="'font-size:' + {xs:'0.7rem',sm:'0.8rem',md:'0.9rem',lg:'1.05rem',xl:'1.2rem'}[s]"
+                            @click="fontSize = s">A</button>
+                </template>
+            </div>
+            <div class="settings-locale-toggle">
+                <button class="locale-toggle-btn" type="button">繁</button>
+            </div>
+            <div class="settings-theme-toggle">
+                <button class="theme-toggle-btn" type="button"><i class="bi bi-moon-stars"></i></button>
+            </div>
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         Anchor nav
-    ═══════════════════════════════════════════════════════════════ -->
-    <nav class="smock-anchor" aria-label="POC sections">
-        <a href="#view-a"><span class="num">1</span>{{ t('settings.mock.anchor_a') }}</a>
-        <a href="#view-b"><span class="num">2</span>{{ t('settings.mock.anchor_b') }}</a>
-        <a href="#view-c"><span class="num">3</span>{{ t('settings.mock.anchor_c') }}</a>
-    </nav>
-
-    <!-- Disconnect toast — fires on click of a disconnected metatube pill -->
-    <div class="smock-disconnect-toast"
-         x-show="showDisconnectToast"
-         x-transition.opacity.duration.200ms
-         role="status"
-         aria-live="polite">
-        <i class="bi bi-info-circle"></i>
-        <span>
-            <strong x-text="disconnectedSourceName"></strong>
-            — {{ t('settings.mock.mt_disconnect_toast') }}
-        </span>
+    <!-- 常用開關（下載劇照 + 進階搜尋 Beta）— 獨立 strip，置於 header 下方，不在任何 section/card 內 -->
+    <div class="smock-quicktoggles">
+        <label class="settings-label">
+            <input type="checkbox" class="toggle toggle-primary">
+            <span class="label-text">{{ t('settings.scraper.download_sample_images_label') }}</span>
+        </label>
+        <label class="settings-label">
+            <input type="checkbox" class="toggle toggle-primary">
+            <span class="label-text">{{ t('settings.mock.advanced_search_label') }}</span>
+        </label>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         SECTION 1 — Tab IA preview
-    ═══════════════════════════════════════════════════════════════ -->
-    <section id="view-a" class="smock-view">
-        <header class="smock-view-head">
-            <div class="marker">1</div>
-            <div>
-                <h2 class="smock-view-title">{{ t('settings.mock.view_a_title') }}</h2>
-                <p class="smock-view-goal">{{ t('settings.mock.view_a_goal') }}</p>
-            </div>
-        </header>
+    <div class="smock-poc">
+        <i class="bi bi-eye-slash"></i>
+        <span>{{ t('settings.mock.hidden_note') }}</span>
+        <span>·</span>
+        <span>{{ t('settings.mock.subtitle') }}</span>
+    </div>
 
-        <div class="smock-card">
-            <div class="smock-card-head">
-                <h4>Settings <span style="opacity:0.55">›</span> <span x-text="tabLabels[viewATab]"></span></h4>
-                <span class="label">{{ t('settings.mock.live_demo_label') }}</span>
-            </div>
-            <div class="smock-card-body">
-                <div class="smock-tabbar" role="tablist" aria-label="Settings sections">
-                    {% for tab in mock_tabs %}
-                    <button class="smock-tab"
-                            role="tab"
-                            :class="{ active: viewATab === '{{ tab.id }}' }"
-                            :aria-selected="viewATab === '{{ tab.id }}'"
-                            @click="viewATab = '{{ tab.id }}'">
-                        <i class="bi {{ tab.icon }}"></i>
-                        <span>{{ t(tab.label_key) }}</span>
-                    </button>
-                    {% endfor %}
-                </div>
+    <!-- ═══════════════ 1 — 搜尋與刮削（兩張卡）═══════════════ -->
+    <section id="sec-search" class="smock-section" data-spy-section>
 
-                {% for tab in mock_tabs %}
-                    {% if tab.id == 'sources' %}
-                    <div class="smock-tabpanel" x-show="viewATab === 'sources'">
-                        <div class="smock-tabpanel-empty" style="text-align:left;">
-                            <i class="bi bi-arrow-down-circle"></i>
-                            <div><strong>{{ t('settings.mock.tab.sources') }}</strong></div>
-                            <div style="margin-top:0.3rem; font-size:0.82rem;">
-                                {{ t('settings.mock.section_a_pointer') }}
-                            </div>
-                            <div style="margin-top:0.7rem;">
-                                <a href="#view-b"
-                                   style="font-size:0.85rem; font-weight:600; color:var(--accent); text-decoration:none;">
-                                    {{ t('settings.mock.anchor_b') }} ↓
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                    {% else %}
-                    <div class="smock-tabpanel" x-show="viewATab === '{{ tab.id }}'">
-                        <div class="smock-tabpanel-empty">
-                            <i class="bi {{ tab.icon }}"></i>
-                            <div><strong>{{ t(tab.label_key) }}</strong></div>
-                            <div style="margin-top:0.3rem; font-size:0.82rem;">{{ t('settings.mock.tab_placeholder') }}</div>
-                        </div>
-                    </div>
-                    {% endif %}
-                {% endfor %}
+        <!-- Card 1a：搜尋來源 (Active Row + Metatube) -->
+        <div class="card mb-4">
+            <div class="settings-card-header">
+                <span class="smock-marker">1</span>
+                <i class="bi bi-collection"></i> {{ t('settings.mock.card_sources_title') }}
             </div>
-        </div>
-    </section>
+            <div class="card-body">
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         SECTION 2 — Active Row (Zone A) — flat pill row
-         8 builtin (any enabled state, strikethrough when off)
-         + enabled metatube + JavLibrary BETA fixed last.
-    ═══════════════════════════════════════════════════════════════ -->
-    <section id="view-b" class="smock-view">
-        <header class="smock-view-head">
-            <div class="marker">2</div>
-            <div>
-                <h2 class="smock-view-title">{{ t('settings.mock.view_b_title') }}</h2>
-                <p class="smock-view-goal">{{ t('settings.mock.view_b_goal') }}</p>
-            </div>
-        </header>
-
-        <div class="smock-card">
-            <div class="smock-card-head">
-                <h4>{{ t('settings.mock.tab.sources') }}</h4>
-                <span class="label">active row · v2</span>
-            </div>
-            <div class="smock-card-body">
-
-                <!-- Batch bar: uncensored switch + global cap counter + 全開 -->
-                <div class="smock-batchbar">
-                    <div class="smock-batchbar-left">
-                        <label class="smock-switch">
-                            <input type="checkbox"
-                                   :checked="uncensoredMode"
-                                   @change="toggleUncensoredMode()"
-                                   :aria-label="uncensoredMode ? '{{ t('settings.mock.uncensored_mode_label') }} on' : '{{ t('settings.mock.uncensored_mode_label') }} off'">
+                <!-- batch bar -->
+                <div class="settings-sources-batchbar">
+                    <div class="settings-sources-batchbar-left">
+                        <button type="button" class="settings-sources-uncensored-toggle"
+                                :class="{ 'is-on': uncensoredMode }"
+                                :aria-pressed="uncensoredMode ? 'true' : 'false'"
+                                @click="toggleUncensoredMode()">
                             <span class="track"><span class="thumb"></span></span>
-                            <span class="lbl">
-                                {{ t('settings.mock.uncensored_mode_label') }}
-                                <small>{{ t('settings.mock.uncensored_mode_help') }}</small>
-                            </span>
-                        </label>
-                        <span class="smock-counter" :title="`{{ t('settings.mock.cap_label') }} = ${MAX_TIER1}`">
+                            <span class="lbl">{{ t('settings.mock.uncensored_mode_label') }}</span>
+                        </button>
+                        <span class="settings-sources-counter">
                             <span>{{ t('settings.mock.counter_suffix') }}</span>
-                            <strong x-text="tier1Count"></strong>
+                            <strong x-text="enabledCount"></strong>
                             <span class="cap-divider">/</span>
-                            <span class="cap-value" x-text="MAX_TIER1"></span>
-                            <span class="cap-tag">cap</span>
+                            <span class="cap-value">10</span>
+                            <span class="cap-tag">{{ t('settings.mock.cap_label') }}</span>
                         </span>
                     </div>
-                    <div class="smock-batchbar-right">
-                        <button class="smock-mini-btn" @click="enableAllToCap()">
-                            <i class="bi bi-arrow-counterclockwise"></i> {{ t('settings.mock.enable_all') }}
+                    <div class="settings-sources-batchbar-right">
+                        <button type="button" class="settings-sources-mini-btn" @click="enableAllToCap()">
+                            <i class="bi bi-check2-all"></i> {{ t('settings.mock.enable_all') }}
                         </button>
                     </div>
                 </div>
 
-                <!-- Uncensored-mode off transient hint (design §EC-2) -->
-                <p class="smock-uncens-hint"
-                   x-show="showUncensoredOffHint"
-                   x-transition.opacity.duration.200ms
-                   role="status"
-                   aria-live="polite">
-                    <i class="bi bi-info-circle"></i>
-                    <span>{{ t('settings.mock.uncensored_mode_off_hint') }}</span>
-                </p>
-
-                <!-- ─── Active Row flat pill row ─── -->
-                <div class="smock-pills" role="listbox" aria-label="Active Row">
-                    <template x-for="src in activeRowSources" :key="src.id">
-                        <div class="smock-pill"
+                <!-- Active Row pills -->
+                <div class="settings-sources-pills" role="listbox" aria-label="Active Row">
+                    <template x-for="s in activeRowSources" :key="s.id">
+                        <div class="source-pill"
                              :class="{
-                                 'is-mt': src.type === 'metatube',
-                                 'is-manual-only': src.type === 'manual_only',
-                                 'is-disconnected': isDisconnectedMetatube(src),
-                                 dragging: draggingId === src.id,
-                                 'drop-target': dropTargetId === src.id,
+                                 'source-pill--uncensored': !s.is_censored,
+                                 dragging: draggingId === s.id,
+                                 'drop-target': dropTargetId === s.id,
                              }"
-                             :data-enabled="pillVisualEnabled(src) ? 'true' : 'false'"
-                             :data-cat="src.is_censored ? 'censored' : 'uncensored'"
-                             :draggable="isDraggable(src) ? 'true' : 'false'"
-                             :title="srcTooltip(src)"
-                             role="option"
-                             :aria-selected="src.enabled"
-                             :aria-label="src.type === 'manual_only'
-                                 ? '{{ t('settings.mock.javlibrary_beta_aria') }}'
-                                 : (isDisconnectedMetatube(src)
-                                     ? `${src.name} — {{ t('settings.mock.disconnected_reconnect_aria') }}`
-                                     : (pillVisualEnabled(src)
-                                         ? `${src.name} — {{ t('settings.mock.pill_enabled_aria') }}`
-                                         : `${src.name} — {{ t('settings.mock.pill_disabled_aria') }}`))"
+                             :data-enabled="s.enabled ? 'true' : 'false'"
+                             role="option" :aria-selected="s.enabled ? 'true' : 'false'"
                              tabindex="0"
-                             @click="clickActiveRowPill(src)"
-                             @keydown.enter.prevent="clickActiveRowPill(src)"
-                             @keydown.space.prevent="clickActiveRowPill(src)"
-                             @dragstart="onDragStart($event, src.id)"
+                             :draggable="isDraggable(s) ? 'true' : 'false'"
+                             :title="srcTooltip(s)"
+                             :aria-label="s.enabled ? `${s.name} — {{ t('settings.mock.pill_enabled_aria') }}` : `${s.name} — {{ t('settings.mock.pill_disabled_aria') }}`"
+                             @click="clickActiveRowPill(s)"
+                             @keydown.enter.prevent="clickActiveRowPill(s)"
+                             @keydown.space.prevent="clickActiveRowPill(s)"
+                             @dragstart="onDragStart($event, s.id)"
                              @dragend="onDragEnd()"
-                             @dragover.prevent="onDragOver($event, src.id)"
+                             @dragover.prevent="onDragOver($event, s.id)"
                              @dragleave="dropTargetId = null"
-                             @drop.prevent="onDrop($event, src.id)">
+                             @drop.prevent="onDrop($event, s.id)">
                             <i class="bi bi-slash-circle slash-icn" aria-hidden="true"></i>
-                            <span class="pill-name" x-text="src.name"></span>
-                            <template x-if="src.type === 'manual_only'">
-                                <span class="smock-pill-badge is-manual-only">
-                                    {{ t('settings.mock.manual_only_badge') }}
-                                </span>
-                            </template>
+                            <span class="pill-name" x-text="s.name"></span>
+                            <span class="source-pill-mt-badge" x-show="s.type === 'metatube'" aria-hidden="true">m</span>
                         </div>
                     </template>
                 </div>
 
-                <!-- Cap-block alert (transient; auto-dismiss + dismissable) -->
-                <div class="smock-cap-alert"
-                     x-show="showCapAlert"
-                     x-transition.duration.250ms
-                     role="alert"
-                     aria-live="polite">
+                <div class="settings-sources-cap-alert" x-show="showCapAlert" x-transition role="alert" aria-live="polite">
                     <i class="bi bi-shield-exclamation"></i>
                     <div>
                         <strong>{{ t('settings.mock.cap_exceeded_title') }}</strong>
                         <p>{{ t('settings.mock.cap_exceeded_body') }}</p>
                     </div>
-                    <button type="button" @click="showCapAlert = false">
-                        {{ t('settings.mock.cap_alert_dismiss') }}
-                    </button>
                 </div>
 
-                <!-- Full-disabled warning (cap basis = 0) -->
-                <div class="smock-warn" x-show="tier1Count === 0" x-transition>
+                <div class="settings-sources-warn" x-show="enabledCount === 0" role="status" aria-live="polite">
                     <i class="bi bi-exclamation-triangle-fill"></i>
                     <span>{{ t('settings.mock.warn_all_disabled') }}</span>
                 </div>
 
-                <!-- Disabled footnote: always-on Rule reminder (design §4.1) -->
-                <p class="smock-tier2-footnote">
-                    {{ t('settings.mock.disabled_footnote') }}
-                </p>
+                <p class="settings-sources-footnote">{{ t('settings.mock.disabled_footnote') }}</p>
 
-                <!-- Secondary / debug control: 全停用 (de-emphasized) -->
-                <div class="smock-debug-row">
-                    <button class="smock-mini-btn ghost"
-                            @click="demoteAll()"
-                            title="POC debug — verify warning state">
-                        <i class="bi bi-bug"></i> {{ t('settings.mock.disable_all_debug') }}
+                <!-- Metatube enable toggle = gate (CD-64-B3) -->
+                <div class="smock-mt-gate">
+                    <div class="settings-form-group" style="margin-bottom:0;">
+                        <label class="settings-label">
+                            <input type="checkbox" class="toggle toggle-primary"
+                                   x-model="metatubeEnabled" @change="onMetatubeEnableChange()">
+                            <span class="label-text">{{ t('settings.mock.mt_enable_label') }}</span>
+                        </label>
+                        <small class="settings-hint">{{ t('settings.mock.mt_enable_help') }}</small>
+                    </div>
+
+                    <div class="settings-sources-section3" x-show="metatubeEnabled" x-collapse style="margin-top:0.75rem;">
+                        <!-- idle: connect form -->
+                        <div class="settings-mt-connect-form" x-show="!metatubeConnected" role="group">
+                            <label class="settings-mt-field">
+                                <span>{{ t('settings.mock.mt_connection_url_label') }}</span>
+                                <input type="text" x-model="urlInput" :placeholder="urlPlaceholder">
+                            </label>
+                            <label class="settings-mt-field">
+                                <span>{{ t('settings.mock.mt_connection_token_label') }}</span>
+                                <input type="password" x-model="tokenInput" autocomplete="off">
+                            </label>
+                            <label class="settings-mt-field-checkbox">
+                                <input type="checkbox" class="toggle toggle-sm toggle-primary" x-model="lanMode">
+                                <span>{{ t('settings.mock.mt_lan_label') }}</span>
+                            </label>
+                            <button type="button" class="settings-mt-connect-btn" :disabled="metatubeConnecting" @click="mockConnect()">
+                                <i class="bi" :class="metatubeConnecting ? 'bi-hourglass-split' : 'bi-plug'"></i>
+                                <span x-text="metatubeConnecting ? '{{ t('settings.mock.mt_connecting_button') }}' : '{{ t('settings.mock.mt_connect_button') }}'"></span>
+                            </button>
+                        </div>
+
+                        <!-- connected: status + Parts Bin -->
+                        <div x-show="metatubeConnected" x-transition>
+                            <div class="settings-mt-connect-status">
+                                <i class="bi bi-check-circle-fill" aria-hidden="true"></i>
+                                <span class="status-text">{{ t('settings.mock.mt_connected_header') }}
+                                    <code x-text="urlInput || urlPlaceholder"></code>
+                                </span>
+                                <button type="button" class="settings-sources-mini-btn" @click="mockEdit()">
+                                    <i class="bi bi-pencil"></i> {{ t('settings.mock.mt_edit_button') }}
+                                </button>
+                                <button type="button" class="settings-sources-mini-btn" x-show="probeDone" @click="mockRetest()">
+                                    <i class="bi bi-arrow-clockwise"></i> {{ t('settings.mock.mt_retest_button') }}
+                                </button>
+                                <button type="button" class="settings-sources-mini-btn" @click="mockDisconnect()">
+                                    <i class="bi bi-x-circle"></i> {{ t('settings.mock.mt_disconnect_button') }}
+                                </button>
+                            </div>
+
+                            <div class="settings-mt-probe-progress" x-show="!probeDone">
+                                <i class="bi bi-hourglass-split" aria-hidden="true"></i>
+                                <span>{{ t('settings.mock.mt_probe_testing') }}</span>
+                            </div>
+
+                            <div class="settings-mt-tier-hint">
+                                <i class="bi bi-stars" aria-hidden="true"></i>
+                                <span>{{ t('settings.mock.mt_connected_tier_hint') }}</span>
+                            </div>
+
+                            <details class="settings-mt-probe-hint">
+                                <summary>{{ t('settings.mock.mt_probe_hint_title') }}</summary>
+                                <p style="margin:0.4rem 0 0;font-size:0.78rem;color:var(--text-secondary);">{{ t('settings.mock.mt_probe_failed_hint') }}</p>
+                            </details>
+
+                            <button type="button" class="settings-mt-partsbin-head"
+                                    @click="partsBinExpanded = !partsBinExpanded"
+                                    :aria-expanded="partsBinExpanded ? 'true' : 'false'"
+                                    :aria-label="partsBinExpanded ? '{{ t('settings.mock.mt_provider_list_collapse_aria') }}' : '{{ t('settings.mock.mt_provider_list_expand_aria') }}'">
+                                <i class="bi" :class="partsBinExpanded ? 'bi-chevron-down' : 'bi-chevron-right'" aria-hidden="true"></i>
+                                <span>{{ t('settings.mock.mt_provider_list_label') }}</span>
+                                <span class="settings-mt-partsbin-count" x-text="partsBinSources.length"></span>
+                            </button>
+
+                            <div class="settings-mt-partsbin-body" x-show="partsBinExpanded" x-collapse>
+                                <div class="settings-sources-pills" role="listbox" aria-label="Provider list">
+                                    <template x-for="src in partsBinSources" :key="src.id">
+                                        <div class="source-pill is-partsbin"
+                                             data-enabled="false"
+                                             :data-available="src.available ? 'true' : 'false'"
+                                             role="option" :aria-selected="false"
+                                             tabindex="0"
+                                             :title="src.available === false ? '{{ t('settings.mock.mt_probe_failed_hint') }}' : '{{ t('settings.mock.mt_promote_hint') }}'"
+                                             :aria-label="`${src.name} — ${src.available === false ? '{{ t('settings.mock.mt_probe_failed_hint') }}' : '{{ t('settings.mock.mt_promote_hint') }}'}`"
+                                             @click="promoteMetatube(src.id)"
+                                             @keydown.enter.prevent="promoteMetatube(src.id)"
+                                             @keydown.space.prevent="promoteMetatube(src.id)">
+                                            <i class="bi bi-slash-circle slash-icn" aria-hidden="true"></i>
+                                            <span class="pill-name" x-text="src.name"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 1b：刮削與翻譯 -->
+        <div class="card mb-4">
+            <div class="settings-card-header">
+                <span class="smock-marker">2</span>
+                <i class="bi bi-gear"></i> {{ t('settings.mock.card_scrape_title') }}
+            </div>
+            <div class="card-body">
+
+                <!-- 我的最愛資料夾 + scanner dropdown -->
+                <div class="settings-form-row">
+                    <label class="row-label">
+                        {{ t('settings.search.favorite_folder_label') }}
+                        <small class="settings-hint">{{ t('settings.search.favorite_folder_hint') }}</small>
+                    </label>
+                    <div class="flex-1 flex flex-col gap-1">
+                        <div class="variable-input-group" style="position:relative;">
+                            <input type="text" class="input input-bordered input-sm flex-1" placeholder="{{ t('settings.search.favorite_folder_placeholder') }}">
+                            <button type="button" class="btn btn-sm btn-outline"><i class="bi bi-folder2-open"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 翻譯 enable + provider (在搜尋與刮削裡，對齊舊版) -->
+                <div class="settings-form-group">
+                    <label class="settings-label">
+                        <input type="checkbox" class="toggle toggle-primary" x-model="translateEnabled">
+                        <i class="bi bi-translate"></i>
+                        <span class="label-text">{{ t('settings.translate.enabled_label') }}</span>
+                    </label>
+                </div>
+                <div :class="{ 'opacity-50': !translateEnabled }">
+                    <div class="settings-form-row">
+                        <label class="row-label">{{ t('settings.translate.provider_label') }}</label>
+                        <select class="select select-bordered select-sm" x-model="translateProvider" :disabled="!translateEnabled">
+                            <option value="ollama">Ollama{{ t('settings.translate.ollama_local') }}</option>
+                            <option value="gemini">Gemini{{ t('settings.translate.gemini_cloud') }}</option>
+                            <option value="openai">OpenAI Compatible</option>
+                        </select>
+                    </div>
+                    <div class="settings-form-row" x-show="translateProvider === 'ollama'">
+                        <label class="row-label">Ollama URL</label>
+                        <div class="variable-input-group">
+                            <input type="text" class="input input-bordered input-sm flex-1" placeholder="http://127.0.0.1:11434">
+                            <button class="btn btn-sm btn-outline" type="button" :disabled="!translateEnabled"><i class="bi bi-plug"></i> {{ t('settings.action.test') }}</button>
+                        </div>
+                    </div>
+                    <div class="settings-form-row" x-show="translateProvider === 'gemini'">
+                        <label class="row-label">API Key</label>
+                        <div class="variable-input-group">
+                            <input type="password" class="input input-bordered input-sm flex-1" placeholder="AIza...">
+                            <button class="btn btn-sm btn-outline" type="button" :disabled="!translateEnabled"><i class="bi bi-plug"></i> {{ t('settings.action.test') }}</button>
+                        </div>
+                    </div>
+                    <div class="settings-form-row" x-show="translateProvider === 'openai'">
+                        <label class="row-label">Base URL</label>
+                        <div class="variable-input-group">
+                            <input type="text" class="input input-bordered input-sm flex-1" placeholder="https://api.openai.com/v1">
+                            <button class="btn btn-sm btn-outline" type="button" :disabled="!translateEnabled"><i class="bi bi-plug"></i> {{ t('settings.action.test') }}</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 進階刮削設定 (inline collapse, old-version pattern) -->
+                <hr class="my-3">
+                <div x-data="{ expanded: false }">
+                    <button class="collapsible-trigger" type="button" @click="expanded = !expanded" :aria-expanded="expanded.toString()">
+                        <span class="collapsible-title"><i class="bi bi-gear"></i> {{ t('settings.mock.adv_scrape_label') }}</span>
+                        <span class="btn-icon-collapse" aria-hidden="true"><i class="bi bi-chevron-down" :class="{ 'rotate-180': expanded }"></i></span>
                     </button>
+                    <div x-show="expanded" x-collapse class="collapsible-content">
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.scraper.suffix_keywords_label') }}
+                                <small class="settings-hint">{{ t('settings.scraper.suffix_keywords_hint') }}</small>
+                            </label>
+                            <input type="text" class="input input-bordered input-sm" placeholder="-4k -uncen">
+                        </div>
+                        <div class="settings-form-group">
+                            <label class="settings-label">
+                                <input type="checkbox" class="toggle toggle-primary">
+                                <span class="label-text">{{ t('settings.scraper.create_folder_label') }}</span>
+                            </label>
+                        </div>
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.scraper.folder_layers_label') }}</label>
+                            <input type="text" class="input input-bordered input-sm" placeholder="{actor} / {maker} / {num}">
+                        </div>
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.scraper.filename_format_label') }}</label>
+                            <input type="text" class="input input-bordered input-sm" placeholder="[{num}][{maker}] {title}{suffix}">
+                        </div>
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.scraper.max_title_length_label') }}</label>
+                            <div class="input-group-inline">
+                                <input type="number" class="input input-bordered input-sm" value="80">
+                                <span class="input-suffix">{{ t('settings.scraper.unit_chars') }}</span>
+                            </div>
+                        </div>
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.scraper.max_filename_length_label') }}</label>
+                            <div class="input-group-inline">
+                                <input type="number" class="input input-bordered input-sm" value="150">
+                                <span class="input-suffix">{{ t('settings.scraper.unit_chars') }}</span>
+                            </div>
+                        </div>
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.scraper.video_extensions_label') }}</label>
+                            <input type="text" class="input input-bordered input-sm" placeholder=".mp4 .mkv .wmv .avi">
+                        </div>
+                        <!-- Proxy + DMM proxy hint (CD-64-B4) -->
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.mock.proxy_label') }}
+                                <small class="settings-hint">{{ t('settings.mock.proxy_hint') }}</small>
+                            </label>
+                            <div class="variable-input-group">
+                                <input type="text" class="input input-bordered input-sm flex-1" placeholder="http://127.0.0.1:7890">
+                                <button class="btn btn-sm btn-outline" type="button">{{ t('settings.action.test') }}</button>
+                            </div>
+                        </div>
+                        <small class="settings-hint"><i class="bi bi-info-circle"></i> {{ t('settings.mock.dmm_proxy_hint') }}</small>
+                    </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         SECTION 3 — Metatube Connection + Parts Bin (Zone B)
-         State machine: disabled / idle / connected.
-    ═══════════════════════════════════════════════════════════════ -->
-    <section id="view-c" class="smock-view">
-        <header class="smock-view-head">
-            <div class="marker">3</div>
-            <div>
-                <h2 class="smock-view-title">{{ t('settings.mock.view_c_title') }}</h2>
-                <p class="smock-view-goal">{{ t('settings.mock.view_c_goal') }}</p>
+    <!-- ═══════════════ 2 — 列表生成 ═══════════════ -->
+    <section id="sec-gallery" class="smock-section" data-spy-section>
+        <div class="card mb-4">
+            <div class="settings-card-header">
+                <span class="smock-marker">3</span>
+                <i class="bi bi-list-ul"></i> {{ t('settings.mock.card_gallery_title') }}
             </div>
-        </header>
-
-        <!-- POC mock state switcher (development-only affordance) -->
-        <div class="smock-state-switch" role="group" :aria-label="'{{ t('settings.mock.mt_state_label') }}'">
-            <span class="label">{{ t('settings.mock.mt_state_label') }}</span>
-            <div class="opts">
-                <button class="smock-state-btn" :class="{ active: metatubeState === 'disabled'  }" @click="mockSetState('disabled')">{{ t('settings.mock.mt_state_disabled') }}</button>
-                <button class="smock-state-btn" :class="{ active: metatubeState === 'idle'      }" @click="mockSetState('idle')">{{ t('settings.mock.mt_state_idle') }}</button>
-                <button class="smock-state-btn" :class="{ active: metatubeState === 'connected' }" @click="mockSetState('connected')">{{ t('settings.mock.mt_state_connected') }}</button>
-            </div>
-        </div>
-
-        <!-- STATE 1: disabled — OUTSIDE-card explainer (card itself hidden) -->
-        <div class="smock-mt-disabled-explainer"
-             x-show="metatubeState === 'disabled'"
-             x-transition.opacity.duration.200ms
-             role="status">
-            <i class="bi bi-info-circle"></i>
-            <div>
-                <strong>POC NOTE</strong>
-                {{ t('settings.mock.mt_disabled_poc_note') }}
-            </div>
-        </div>
-
-        <!-- Card: hidden in disabled state -->
-        <div class="smock-card"
-             x-show="metatubeState !== 'disabled'"
-             x-transition.opacity.duration.200ms>
-            <div class="smock-card-head">
-                <h4>{{ t('settings.mock.group_metatube') }} —
-                    <span x-show="metatubeState === 'idle'">{{ t('settings.mock.mt_state_idle') }}</span>
-                    <span x-show="metatubeState === 'connected'">{{ t('settings.mock.mt_state_connected') }}</span>
-                </h4>
-                <span class="label" x-text="metatubeState"></span>
-            </div>
-            <div class="smock-card-body">
-
-                <!-- STATE 2: idle — connect form -->
-                <div class="smock-mt-connect-form" x-show="metatubeState === 'idle'" x-transition role="group">
-                    <label class="smock-mt-field">
-                        <span>{{ t('settings.mock.mt_connection_url_label') }}</span>
-                        <input type="text" x-model="urlInput" :placeholder="urlPlaceholder">
-                    </label>
-                    <label class="smock-mt-field">
-                        <span>{{ t('settings.mock.mt_connection_token_label') }}</span>
-                        <input type="password" x-model="tokenInput" :placeholder="tokenPlaceholder">
-                    </label>
-                    <button class="smock-mt-connect-btn" @click="mockConnect()">
-                        <i class="bi bi-plug"></i> {{ t('settings.mock.mt_connect_button') }}
-                    </button>
+            <div class="card-body">
+                <div class="settings-form-row">
+                    <label class="row-label">{{ t('settings.gallery.output_dir_label') }}</label>
+                    <div class="variable-input-group">
+                        <input type="text" class="input input-bordered input-sm flex-1" placeholder="output">
+                        <button class="btn btn-sm btn-outline btn-neutral" type="button"><i class="bi bi-folder"></i></button>
+                    </div>
+                </div>
+                <div class="settings-form-row">
+                    <label class="row-label">{{ t('settings.gallery.output_filename_label') }}</label>
+                    <input type="text" class="input input-bordered input-sm" placeholder="gallery_output.html">
                 </div>
 
-                <!-- STATE 3: connected -->
-                <div x-show="metatubeState === 'connected'" x-transition>
-
-                    <!-- Connection status row -->
-                    <div class="smock-mt-connect-status">
-                        <i class="bi bi-check-circle-fill"></i>
-                        <span class="status-text">
-                            {{ t('settings.mock.mt_connected_header') }} —
-                            <code x-text="urlInput || urlPlaceholder"></code>
-                        </span>
-                        <button class="smock-mini-btn" @click="mockSetState('idle')">
-                            <i class="bi bi-pencil"></i> {{ t('settings.mock.mt_edit_button') }}
-                        </button>
-                        <button class="smock-mini-btn" @click="mockDisconnect()">
-                            <i class="bi bi-x-circle"></i> {{ t('settings.mock.mt_disconnect_button') }}
-                        </button>
-                    </div>
-
-                    <!-- Tier hint banner -->
-                    <div class="smock-mt-tier-hint">
-                        <i class="bi bi-stars"></i>
-                        <span>{{ t('settings.mock.mt_connected_tier_hint') }}</span>
-                    </div>
-
-                    <!-- Parts Bin header (collapsible, default collapsed) -->
-                    <button type="button"
-                            class="smock-tier-head is-collapsible is-tier2"
-                            @click="partsBinExpanded = !partsBinExpanded"
-                            :aria-expanded="partsBinExpanded"
-                            :aria-label="partsBinExpanded ? '{{ t('settings.mock.mt_provider_list_collapse_aria') }}' : '{{ t('settings.mock.mt_provider_list_expand_aria') }}'">
-                        <i class="bi" :class="partsBinExpanded ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
-                        <span>{{ t('settings.mock.mt_provider_list_label') }}</span>
-                        <span class="smock-group-count" x-text="`${partsBinSources.length}`"></span>
+                <hr class="my-3">
+                <div x-data="{ expanded: false }">
+                    <button class="collapsible-trigger" type="button" @click="expanded = !expanded" :aria-expanded="expanded.toString()">
+                        <span class="collapsible-title"><i class="bi bi-sliders"></i> {{ t('settings.mock.adv_gallery_label') }}</span>
+                        <span class="btn-icon-collapse" aria-hidden="true"><i class="bi bi-chevron-down" :class="{ 'rotate-180': expanded }"></i></span>
                     </button>
-
-                    <div x-show="partsBinExpanded" x-transition.opacity.duration.200ms>
-                        <!-- flat pill loop (no Recommended group, B3 §7.5) -->
-                        <div class="smock-pills" role="listbox" aria-label="Provider list">
-                            <template x-for="src in partsBinSources" :key="src.id">
-                                <div class="smock-pill is-mt"
-                                     data-enabled="false"
-                                     role="option"
-                                     :aria-selected="false"
-                                     :aria-label="`${src.name} — {{ t('settings.mock.mt_promote_hint') }}`"
-                                     :title="'{{ t('settings.mock.mt_promote_hint') }}'"
-                                     tabindex="0"
-                                     @click="promoteMetatube(src.id)"
-                                     @keydown.enter.prevent="promoteMetatube(src.id)"
-                                     @keydown.space.prevent="promoteMetatube(src.id)">
-                                    <i class="bi bi-slash-circle slash-icn" aria-hidden="true"></i>
-                                    <span class="pill-name" x-text="src.name"></span>
-                                </div>
-                            </template>
+                    <div x-show="expanded" x-collapse class="collapsible-content">
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.gallery.default_mode_label') }}</label>
+                            <select class="select select-bordered select-sm">
+                                <option>{{ t('settings.gallery.mode_image') }}</option>
+                                <option>{{ t('settings.gallery.mode_detail') }}</option>
+                                <option>{{ t('settings.gallery.mode_text') }}</option>
+                            </select>
+                        </div>
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.gallery.default_sort_label') }}</label>
+                            <div class="sort-row flex gap-2 flex-1">
+                                <select class="select select-bordered select-sm flex-1">
+                                    <option>{{ t('settings.gallery.sort_date') }}</option>
+                                    <option>{{ t('settings.gallery.sort_num') }}</option>
+                                    <option>{{ t('settings.gallery.sort_title') }}</option>
+                                </select>
+                                <select class="select select-bordered select-sm w-[100px]">
+                                    <option>{{ t('settings.gallery.order_desc') }}</option>
+                                    <option>{{ t('settings.gallery.order_asc') }}</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.gallery.items_per_page_label') }}</label>
+                            <select class="select select-bordered select-sm">
+                                <option>60</option><option>90</option><option>120</option>
+                                <option>{{ t('settings.gallery.all') }}</option>
+                            </select>
+                        </div>
+                        <div class="settings-form-row">
+                            <label class="row-label">{{ t('settings.gallery.min_size_label') }}</label>
+                            <div class="input-group-inline">
+                                <input type="number" class="input input-bordered input-sm" value="0">
+                                <span class="input-suffix">MB</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1199,263 +603,156 @@
         </div>
     </section>
 
+    <!-- ═══════════════ 3 — 系統設定 ═══════════════ -->
+    <section id="sec-system" class="smock-section" data-spy-section>
+        <div class="card mb-4">
+            <div class="settings-card-header">
+                <span class="smock-marker">4</span>
+                <i class="bi bi-sliders"></i> {{ t('settings.mock.card_system_title') }}
+            </div>
+            <div class="card-body">
+                <div class="settings-form-row">
+                    <label class="row-label">{{ t('settings.system.default_page_label') }}</label>
+                    <select class="select select-bordered select-sm">
+                        <option>{{ t('nav.scanner') }}</option>
+                        <option>{{ t('nav.search') }}</option>
+                        <option>{{ t('nav.showcase') }}</option>
+                    </select>
+                </div>
+                <div class="settings-form-row">
+                    <label class="row-label">{{ t('settings.system.player_label') }}</label>
+                    <input type="text" class="input input-bordered input-sm" placeholder="C:\...\PotPlayerMini64.exe">
+                </div>
+                <hr class="my-3">
+                <div class="settings-form-row">
+                    <label class="row-label text-error">{{ t('settings.system.reset_label') }}
+                        <small class="settings-hint">{{ t('settings.system.reset_hint') }}</small>
+                    </label>
+                    <button type="button" class="btn btn-sm btn-outline btn-error">
+                        <i class="bi bi-arrow-counterclockwise"></i> {{ t('settings.action.reset') }}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         Footer note
-    ═══════════════════════════════════════════════════════════════ -->
-    <footer class="smock-foot">
-        <p>
-            {{ t('settings.mock.footer_hint') }}
-            <kbd>click</kbd> {{ t('settings.mock.footer_toggle') }} ·
-            <kbd>drag</kbd> {{ t('settings.mock.footer_drag') }} ·
-            <kbd>11+</kbd> {{ t('settings.mock.footer_cap') }} ·
-            <kbd>state</kbd> {{ t('settings.mock.footer_state') }}
-        </p>
-    </footer>
+    <div class="save-btn-wrapper">
+        <button type="button" class="btn btn-primary save-btn">
+            <i class="bi bi-save"></i> {{ t('settings.action.save') }}
+        </button>
+    </div>
 </div>
 
 <script>
-// ─────────────────────────────────────────────────────────────────────
 // Mock data from FastAPI context
-// ─────────────────────────────────────────────────────────────────────
-const SMOCK_BUILTIN     = {{ mock_builtin_sources|tojson }};
-const SMOCK_MANUAL_ONLY = {{ mock_manual_only_sources|tojson }};
-const SMOCK_METATUBE    = {{ mock_metatube_sources|tojson }};
-
-// Per-source tooltip carrier (JavBus Rule 4b variant-probe warning).
+const SMOCK_BUILTIN  = {{ mock_builtin_sources|tojson }};
+const SMOCK_METATUBE = {{ mock_metatube_sources|tojson }};
 const JAVBUS_TOOLTIP = '{{ t('settings.mock.javbus_tooltip') }}';
 
-// ─────────────────────────────────────────────────────────────────────
-// settingsMockPage — ONE unified Alpine scope spanning the whole page
-// (v2 Two-Zone model, design-source-tiers.v2.md §2 + §9 B1 row).
-//
-//   sources[] = builtin (type='builtin') + metatube (type='metatube')
-//               + manual_only (type='manual_only'), single array → cap is
-//               naturally global.
-//
-//   Zone A (Active Row, Section 2): all builtin (any enabled state) +
-//     enabled metatube + JavLibrary fixed last.
-//   Zone B (Parts Bin, Section 3): only enabled=false metatube, when connected.
-//
-//   `available` is a RUNTIME-ONLY axis on metatube sources (mocked here as
-//   Alpine state; NOT a persisted schema field — design §2.2 / OQ-8).
-// ─────────────────────────────────────────────────────────────────────
+// settingsMockPage — single-column Settings IA POC (feature/64 Phase B).
+// Reuses real settings.css / source-pill.css classes; bindings drive mock state.
 function settingsMockPage() {
     return {
-        // ── tab IA (Section 1) ──
-        viewATab: 'sources',
-        tabLabels: {
-            display:   '{{ t('settings.mock.tab.display') }}',
-            scraping:  '{{ t('settings.mock.tab.scraping') }}',
-            sources:   '{{ t('settings.mock.tab.sources') }}',
-            organize:  '{{ t('settings.mock.tab.organize') }}',
-            translate: '{{ t('settings.mock.tab.translate') }}',
-            advanced:  '{{ t('settings.mock.tab.advanced') }}',
-        },
+        // nav / scroll-spy
+        activeSection: 'sec-search',
+        _spyObserver: null,
 
-        // ── single source registry ──
-        // Builtin: 8 enabled on day one (EC-1 lands at 8/10).
-        // Metatube: all enabled=false + available=false until connect.
-        // Manual-only: javlibrary, fixed last in Active Row.
+        // header / translate visual state
+        fontSize: 'md',
+        translateEnabled: true,
+        translateProvider: 'ollama',
+
+        // source registry
         sources: [
-            ...SMOCK_BUILTIN.map(s => ({ ...s, type: 'builtin', enabled: true, manual_only: false })),
-            ...SMOCK_METATUBE.map((s, i) => ({ ...s, type: 'metatube', enabled: false, manual_only: false, available: false, registryOrder: i })),
-            ...SMOCK_MANUAL_ONLY.map(s => ({ ...s, type: 'manual_only', enabled: false })),
+            ...SMOCK_BUILTIN.map(s => ({ ...s, type: 'builtin', enabled: true })),
+            ...SMOCK_METATUBE.map((s, i) => ({ ...s, type: 'metatube', enabled: false, available: false, registryOrder: i, is_censored: true })),
         ],
         MAX_TIER1: {{ mock_tier1_cap }},
 
-        // ── metatube connection state machine ──
-        metatubeState: 'idle',   // 'disabled' | 'idle' | 'connected'
-        partsBinExpanded: false,  // §2.8 collapsed by default
+        // metatube connection
+        metatubeEnabled: false,
+        metatubeConnected: false,
+        metatubeConnecting: false,
+        probeDone: false,
+        partsBinExpanded: false,
         urlInput: '',
         tokenInput: '',
-        urlPlaceholder:   '{{ mock_metatube_url_placeholder }}',
-        tokenPlaceholder: '{{ mock_metatube_token_placeholder }}',
+        lanMode: false,
+        urlPlaceholder: '{{ mock_metatube_url_placeholder }}',
+        _probeTimer: null,
 
-        // ── transient UI flash state ──
+        // transient
         draggingId: null,
         dropTargetId: null,
         showCapAlert: false,
         _capAlertTimer: null,
-        showUncensoredOffHint: false,
-        _uncensoredOffHintTimer: null,
-        showDisconnectToast: false,
-        disconnectedSourceName: '',
-        _disconnectToastTimer: null,
 
-        // ─────────────────────────────────────────────────────────────
-        // Computed getters
-        // ─────────────────────────────────────────────────────────────
-        // Zone A render order (design §2.3 + §11 glossary): the builtin +
-        // enabled-metatube run preserves GLOBAL `sources` order so drag-sort
-        // can freely interleave builtin and metatube pills (one flat orderable
-        // run). manual_only (JavLibrary) is always appended last, fixed.
+        init() {
+            // scroll-spy (CD-64-B2: Alpine IntersectionObserver, no HTMX)
+            this.$nextTick(() => {
+                this._spyObserver = new IntersectionObserver((entries) => {
+                    entries.forEach(e => { if (e.isIntersecting) this.activeSection = e.target.id; });
+                }, { root: null, rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+                this.$el.querySelectorAll('[data-spy-section]').forEach(s => this._spyObserver.observe(s));
+            });
+        },
+        destroy() { if (this._spyObserver) this._spyObserver.disconnect(); },
+        scrollToSection(id) {
+            this.activeSection = id;
+            const el = document.getElementById(id);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        },
+
+        // computed
         get activeRowSources() {
-            const inRow = this.sources.filter(
-                s => s.type === 'builtin' || (s.type === 'metatube' && s.enabled)
-            );
-            const manualOnly = this.sources.filter(s => s.type === 'manual_only');
-            return [...inRow, ...manualOnly];
+            return this.sources.filter(s => s.type === 'builtin' || (s.type === 'metatube' && s.enabled));
         },
-
-        // Zone B Parts Bin: only enabled=false metatube, FIXED order by stable
-        // registryOrder (design §2.3 — no drag-sort inside Parts Bin). Sort a
-        // spread COPY so the reactive `sources` array is never mutated in place;
-        // the template's two x-for groups (Recommended / Other) preserve this
-        // order within each group, so Recommended-first is handled by template
-        // structure, not the getter.
         get partsBinSources() {
-            return this.sources
-                .filter(s => s.type === 'metatube' && !s.enabled)
-                .slice()
-                .sort((a, b) => a.registryOrder - b.registryOrder);
+            return this.sources.filter(s => s.type === 'metatube' && !s.enabled).slice().sort((a, b) => a.registryOrder - b.registryOrder);
         },
-
-        // Cap basis (counter + promote enforcement). Does NOT look at `available`
-        // (design §2.2 — disconnect-resilient, prevents over-enable footgun).
-        get tier1Count() {
-            return this.sources.filter(s => s.enabled && !s.manual_only).length;
-        },
-
-        // Runtime auto pool (informational; not used for POC routing).
-        // Builtin bypass the `available` gate via type discriminator (design §2.2 P2).
-        get runtimeCount() {
-            return this.sources.filter(s =>
-                s.enabled && !s.manual_only && (s.type !== 'metatube' || s.available)
-            ).length;
-        },
-
-        // Uncensored mode = all enabled non-manual are uncensored, ≥1 censored exists
-        // and is disabled. Manual-only sources excluded from the gating.
+        get enabledCount() { return this.sources.filter(s => s.enabled).length; },
         get uncensoredMode() {
-            const real = this.sources.filter(s => !s.manual_only);
-            const censored = real.filter(s => s.is_censored);
-            const uncens   = real.filter(s => !s.is_censored);
-            return censored.length > 0
-                && censored.every(s => !s.enabled)
-                && uncens.some(s => s.enabled);
+            const censored = this.sources.filter(s => s.type === 'builtin' && s.is_censored);
+            const uncens = this.sources.filter(s => s.type === 'builtin' && !s.is_censored);
+            return censored.length > 0 && censored.every(s => !s.enabled) && uncens.some(s => s.enabled);
         },
+        srcTooltip(s) { return s && s.id === 'javbus' ? JAVBUS_TOOLTIP : ''; },
 
-        // ─────────────────────────────────────────────────────────────
-        // Pill visual / a11y helpers
-        // ─────────────────────────────────────────────────────────────
-        // A metatube pill that is enabled but unavailable = "disconnected"
-        // (gray + strikethrough + slash, same as disabled builtin; differs
-        // only by the `m` corner badge + no-hover + click-toast). §2.4 / EC-9.
-        isDisconnectedMetatube(src) {
-            return src.type === 'metatube' && src.enabled && !src.available;
+        // Active Row clicks
+        clickActiveRowPill(s) {
+            if (!s) return;
+            if (s.type === 'builtin') { this.toggleBuiltin(s.id); return; }
+            if (s.type === 'metatube') { this.demoteMetatube(s.id); return; }
         },
-        // `data-enabled="false"` (strikethrough/slash/dashed) when a builtin is
-        // disabled OR a metatube is disconnected.
-        pillVisualEnabled(src) {
-            if (src.type === 'manual_only') return false;  // BETA renders as muted
-            if (this.isDisconnectedMetatube(src)) return false;
-            return src.enabled;
-        },
-        srcTooltip(src) {
-            if (!src) return '';
-            if (src.id === 'javbus') return JAVBUS_TOOLTIP;
-            return '';
-        },
-
-        // ─────────────────────────────────────────────────────────────
-        // Click handlers (Active Row)
-        // ─────────────────────────────────────────────────────────────
-        clickActiveRowPill(src) {
-            if (!src) return;
-            if (src.type === 'manual_only') { this.clickJavLibrary(); return; }
-            if (this.isDisconnectedMetatube(src)) {
-                this.clickDisconnectedMetatube(src.name);
-                return;
-            }
-            if (src.type === 'builtin') { this.toggleBuiltin(src.id); return; }
-            if (src.type === 'metatube') { this.demoteMetatube(src.id); return; }
-        },
-
-        // Builtin: flip enabled in place (pill never leaves Active Row).
         toggleBuiltin(id) {
             const s = this.sources.find(x => x.id === id);
-            if (!s || s.type !== 'builtin') return;
-            if (!s.enabled && this.tier1Count >= this.MAX_TIER1) {
-                this._flashCapAlert();
-                return;
-            }
+            if (!s) return;
+            if (!s.enabled && this.enabledCount >= this.MAX_TIER1) { this._flashCapAlert(); return; }
             s.enabled = !s.enabled;
         },
-
-        // Promote: Parts Bin → Active Row (enabled=true). Cap check.
-        // Inserts at end of metatube run (before JavLibrary) per EC-3.
         promoteMetatube(id) {
             const s = this.sources.find(x => x.id === id);
             if (!s || s.type !== 'metatube' || s.enabled) return;
-            if (this.tier1Count >= this.MAX_TIER1) {
-                this._flashCapAlert();
-                return;
-            }
+            if (this.enabledCount >= this.MAX_TIER1) { this._flashCapAlert(); return; }
             s.enabled = true;
-            // Move to end of underlying array so it lands last among metatube.
             const idx = this.sources.findIndex(x => x.id === id);
-            if (idx >= 0) {
-                const [moved] = this.sources.splice(idx, 1);
-                this.sources.push(moved);
-            }
+            if (idx >= 0) { const [m] = this.sources.splice(idx, 1); this.sources.push(m); }
         },
-
-        // Demote: Active Row → Parts Bin (enabled=false).
         demoteMetatube(id) {
             const s = this.sources.find(x => x.id === id);
-            if (!s || s.type !== 'metatube') return;
-            s.enabled = false;
+            if (s && s.type === 'metatube') s.enabled = false;
         },
-
-        clickDisconnectedMetatube(name) {
-            this.disconnectedSourceName = name;
-            this.showDisconnectToast = true;
-            if (this._disconnectToastTimer) clearTimeout(this._disconnectToastTimer);
-            this._disconnectToastTimer = setTimeout(() => {
-                this.showDisconnectToast = false;
-            }, 4000);
-        },
-
-        clickJavLibrary() {
-            // Advanced-picker only — no-op in Active Row (§2 decision 10).
-        },
-
-        // ── batch ops ──
         enableAllToCap() {
-            // Enable builtin first (in current order), then promote metatube.
             for (const s of this.sources) {
-                if (s.manual_only || s.enabled) continue;
-                if (s.type === 'metatube') continue;  // builtin first
-                if (this.tier1Count >= this.MAX_TIER1) break;
+                if (s.enabled || s.type === 'metatube') continue;
+                if (this.enabledCount >= this.MAX_TIER1) break;
                 s.enabled = true;
             }
         },
-        demoteAll() {
-            this.sources.forEach(s => {
-                if (s.manual_only) return;
-                if (s.type === 'metatube') { s.enabled = false; return; }
-                s.enabled = false;
-            });
-        },
         toggleUncensoredMode() {
-            // ON (turning on)  : batch-disable censored sources.
-            // OFF (turning off): NO-OP + transient hint (design §EC-2).
-            const goingOn = !this.uncensoredMode;
-            if (goingOn) {
-                this.sources.forEach(s => {
-                    if (s.is_censored && !s.manual_only) s.enabled = false;
-                });
-            } else {
-                this._flashUncensoredOffHint();
+            if (!this.uncensoredMode) {
+                this.sources.forEach(s => { if (s.type === 'builtin' && s.is_censored) s.enabled = false; });
             }
-        },
-        _flashUncensoredOffHint() {
-            this.showUncensoredOffHint = true;
-            if (this._uncensoredOffHintTimer) clearTimeout(this._uncensoredOffHintTimer);
-            this._uncensoredOffHintTimer = setTimeout(() => {
-                this.showUncensoredOffHint = false;
-            }, 5000);
         },
         _flashCapAlert() {
             this.showCapAlert = true;
@@ -1463,37 +760,28 @@ function settingsMockPage() {
             this._capAlertTimer = setTimeout(() => { this.showCapAlert = false; }, 4500);
         },
 
-        // ─────────────────────────────────────────────────────────────
-        // Connection mock (no real HTTP — §2 decision 7)
-        // ─────────────────────────────────────────────────────────────
-        mockConnect() {
-            this.metatubeState = 'connected';
-            // Bulk-set available=true on connect-success (§2 decision 6 / EC-9).
-            this.sources.forEach(s => { if (s.type === 'metatube') s.available = true; });
+        // metatube connection (mock, no real HTTP)
+        onMetatubeEnableChange() {
+            if (!this.metatubeEnabled) { this.metatubeConnected = false; this.metatubeConnecting = false; this.probeDone = false; }
         },
+        mockConnect() { this.metatubeConnecting = true; this.metatubeConnected = true; this.metatubeConnecting = false; this._runProbe(); },
+        mockEdit() { this.metatubeConnected = false; this.probeDone = false; },
         mockDisconnect() {
-            this.metatubeState = 'idle';
-            // enabled stays (cap-stable); flip availability off.
-            this.sources.forEach(s => { if (s.type === 'metatube') s.available = false; });
+            this.metatubeConnected = false; this.probeDone = false;
+            this.sources.forEach(s => { if (s.type === 'metatube') { s.enabled = false; s.available = false; } });
         },
-        // POC debug switcher: jump to any state. 'connected' bulk-sets available;
-        // 'idle'/'disabled' must reset availability so promoted metatube don't
-        // render as still-available (cap-stable: enabled untouched).
-        mockSetState(state) {
-            if (state === 'connected') { this.mockConnect(); return; }
-            this.metatubeState = state;
-            this.sources.forEach(s => { if (s.type === 'metatube') s.available = false; });
+        mockRetest() { this._runProbe(); },
+        _runProbe() {
+            this.probeDone = false;
+            this.sources.forEach((s, i) => { if (s.type === 'metatube') s.available = (i % 7 !== 0); });
+            if (this._probeTimer) clearTimeout(this._probeTimer);
+            this._probeTimer = setTimeout(() => { this.probeDone = true; }, 900);
         },
 
-        // ─────────────────────────────────────────────────────────────
-        // HTML5 native drag-and-drop (Active Row only; CD-61-4).
-        // Drag pool: all builtin (any state) + enabled metatube.
-        // JavLibrary / Parts Bin pills are NOT draggable.
-        // ─────────────────────────────────────────────────────────────
-        isDraggable(src) {
-            if (src.type === 'manual_only') return false;
-            if (src.type === 'builtin') return true;
-            return src.type === 'metatube' && src.enabled;
+        // drag-and-drop (Active Row reorder)
+        isDraggable(s) {
+            if (s.type === 'builtin') return true;
+            return s.type === 'metatube' && s.enabled;
         },
         onDragStart(e, id) {
             this.draggingId = id;
@@ -1510,10 +798,7 @@ function settingsMockPage() {
         onDrop(e, targetId) {
             const srcId = this.draggingId;
             const target = this.sources.find(x => x.id === targetId);
-            if (!srcId || srcId === targetId || !target || !this.isDraggable(target)) {
-                this.onDragEnd();
-                return;
-            }
+            if (!srcId || srcId === targetId || !target || !this.isDraggable(target)) { this.onDragEnd(); return; }
             const srcIdx = this.sources.findIndex(s => s.id === srcId);
             const tgtIdx = this.sources.findIndex(s => s.id === targetId);
             if (srcIdx < 0 || tgtIdx < 0) { this.onDragEnd(); return; }
