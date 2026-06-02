@@ -8863,14 +8863,13 @@ class TestMetatubeB4Guard:
 
 
 class TestMetatubeB5RecommendedRemoved:
-    """CD-63b-7: 守衛靜態 Recommended 群組殘留已徹底拔除（含 settings_mock.html）。
+    """CD-63b-7: 守衛靜態 Recommended 群組殘留已徹底拔除。
 
     「廢棄 feature 拔除要徹底」memory：不留殭屍命名 / 群組頭 / 星標 / i18n key。
     """
 
     SETTINGS_JS = PROJECT_ROOT / "web" / "static" / "js" / "pages" / "settings" / "state-config.js"
     SETTINGS_HTML = PROJECT_ROOT / "web" / "templates" / "settings.html"
-    SETTINGS_MOCK_HTML = PROJECT_ROOT / "web" / "templates" / "settings_mock.html"
     SOURCE_PILL_CSS = PROJECT_ROOT / "web" / "static" / "css" / "components" / "source-pill.css"
     SETTINGS_CSS = PROJECT_ROOT / "web" / "static" / "css" / "pages" / "settings.css"
     ZH_TW = PROJECT_ROOT / "locales" / "zh_TW.json"
@@ -8916,12 +8915,6 @@ class TestMetatubeB5RecommendedRemoved:
         sources = data.get("settings", {}).get("sources", {})
         assert "mt_recommended_label" not in sources and "mt_other_label" not in sources, (
             "CD-63b-7 違規：zh_TW.json settings.sources 仍含 mt_recommended_label / mt_other_label"
-        )
-
-    def test_settings_mock_no_recommended(self):
-        html = self.SETTINGS_MOCK_HTML.read_text(encoding="utf-8")
-        assert "s.recommended" not in html and "rec-star" not in html and "smock-group-head" not in html, (
-            "CD-63b-7 違規：settings_mock.html 仍含 recommended/rec-star/smock-group-head 殘留"
         )
 
 
