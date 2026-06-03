@@ -111,7 +111,8 @@ class TestPipeline:
     def test_dmm_top1_when_proxy(self):
         """DMM first in Active Row order + proxy_url → exact path goes fan-out, DMM wins merge.
 
-        DMM Top-1 shortcut removed in feature/65; exact path is pure fan-out merge now.
+        DMM Top-1 shortcut removed in feature/65; exact path runs Rule 4b (JavBus
+        variant probe) first, then falls through to search_jav(auto) fan-out + merge.
         DMM排第一 + 有 proxy → search_jav(auto) fan-out → merge winner _source == 'dmm'.
         """
         from core.scrapers.jav321 import JAV321Scraper
@@ -155,7 +156,8 @@ class TestPipeline:
     def test_exact_path_always_fan_out(self):
         """精確番號路徑一律走 fan-out，不論 primary_source 值或 proxy 是否為空。
 
-        DMM Top-1 shortcut removed in feature/65; exact path is pure fan-out merge now.
+        DMM Top-1 shortcut removed in feature/65; exact path runs Rule 4b (JavBus
+        variant probe) first, then falls through to search_jav(auto) fan-out + merge.
         primary_source='dmm' + proxy_url='' → search_jav(auto) fan-out still called,
         DMM simply returns no data (dmm_config=None when proxy empty), merge winner = other source.
         """
@@ -173,7 +175,7 @@ class TestPipeline:
         With dmm first in order + dmm returning data → winner _source == 'dmm'.
         This is ORDER-driven, NOT primary_source-driven (CD-61-14: primary_source
         no longer overrides merge winner; DMM Top-1 shortcut removed in feature/65;
-        exact path is pure fan-out merge now).
+        this test exercises search_jav(auto) merge directly, not the smart_search exact path).
         """
         from core.scrapers.jav321 import JAV321Scraper
         from core.scrapers.javdb import JavDBScraper
