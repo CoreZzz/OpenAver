@@ -8,7 +8,6 @@ export function stateConfig() {
             // Search
             searchFavoriteFolder: '',
             proxyUrl: '',
-            primarySource: 'javbus',
             advancedSearchEnabled: false,  // 進階搜尋 picker（TASK-61c-7，top-level config 欄位）
 
             // Translate
@@ -99,17 +98,6 @@ export function stateConfig() {
 
         // 來源分群常數（與 core/scrapers/utils.py 同步）
         CENSORED_SOURCES: ['dmm', 'javbus', 'jav321', 'javdb'],
-        UNCENSORED_SOURCES: ['d2pass', 'heyzo', 'fc2', 'avsox'],
-        SOURCE_NAMES: {
-            'dmm':     'DMM',
-            'javbus':  'JavBus',
-            'jav321':  'Jav321',
-            'javdb':   'JavDB',
-            'd2pass':  'D2Pass',
-            'heyzo':   'HEYZO',
-            'fc2':     'FC2',
-            'avsox':   'AVSOX',
-        },
 
         get formatVariables() {
             return [
@@ -289,23 +277,6 @@ export function stateConfig() {
         },
 
         /**
-         * 來源是否啟用（決定 badge 亮度）
-         * - 有碼來源：無碼模式關閉時啟用
-         * - 無碼來源：無碼模式開啟時啟用
-         * - DMM：有碼模式 + proxy 有值才亮
-         */
-        isSourceActive(src) {
-            const isUncensored = this.UNCENSORED_SOURCES.includes(src);
-            if (isUncensored) {
-                return this.uncensoredMode;
-            }
-            if (src === 'dmm') {
-                return !this.uncensoredMode && !!this.form.proxyUrl.trim();
-            }
-            return !this.uncensoredMode;
-        },
-
-        /**
          * DMM 是否可用（proxy_url 非空）
          * 控制 source-dmm-disabled class（刪除線樣式）
          */
@@ -406,7 +377,6 @@ export function stateConfig() {
                     // 61c-3: uncensoredMode 由 sources 段推導（computed getter），不再單獨讀 uncensored_mode_enabled。
                     this.form.searchFavoriteFolder = config.search?.favorite_folder || '';
                     this.form.proxyUrl = config.search?.proxy_url || '';
-                    this.form.primarySource = config.search?.primary_source || 'javbus';
                     // 進階搜尋（TASK-61c-7）：top-level bool 欄位
                     this.form.advancedSearchEnabled = config.advanced_search_enabled || false;
 
@@ -570,7 +540,6 @@ export function stateConfig() {
                     uncensored_mode_enabled: this.uncensoredMode,
                     favorite_folder: this.form.searchFavoriteFolder.trim(),
                     proxy_url: this.form.proxyUrl.trim(),
-                    primary_source: this.form.primarySource,
                 };
 
                 // 進階搜尋（TASK-61c-7）：top-level bool 欄位（與 nested 區塊並列）
