@@ -256,7 +256,7 @@ class TestEnrichSingleEndpoint:
         assert data.get("source_used") == "javbus"
 
 
-# ── F4: enrich endpoint 從 config["search"] 取 proxy_url / primary_source ─────
+# ── F4: enrich endpoint 從 config["search"] 取 proxy_url ─────
 
 class TestEnrichEndpointReadsSearchConfig:
     def test_proxy_url_taken_from_search_config(self, client, mocker):
@@ -271,12 +271,10 @@ class TestEnrichEndpointReadsSearchConfig:
         mocker.patch("web.routers.scraper.load_config", return_value={
             "search": {
                 "proxy_url": "http://proxy.test:8888",
-                "primary_source": "javdb",
             },
             "scraper": {
                 # 舊的錯誤區段（不應從這裡讀）
                 "proxy_url": "http://wrong.proxy:9999",
-                "primary_source": "wrong_source",
             },
         })
 
@@ -289,9 +287,6 @@ class TestEnrichEndpointReadsSearchConfig:
         call_kwargs = captured_calls[0]
         assert call_kwargs.get("proxy_url") == "http://proxy.test:8888", (
             f"proxy_url 應從 config['search'] 取得，實際: {call_kwargs.get('proxy_url')}"
-        )
-        assert call_kwargs.get("primary_source") == "javdb", (
-            f"primary_source 應從 config['search'] 取得，實際: {call_kwargs.get('primary_source')}"
         )
 
 

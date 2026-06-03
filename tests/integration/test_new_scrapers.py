@@ -3,7 +3,6 @@ Integration tests for scraper-related API endpoints (TestClient).
 
 Covers:
 - Proxy test endpoint (success / 403 / timeout / config persistence)
-- Exact mode passes primary_source to search_jav
 - Unknown source returns HTTP 400
 """
 import pytest
@@ -69,40 +68,6 @@ class TestProxyAPI:
 
         assert resp.status_code == 200
         assert resp.json()["data"]["search"]["proxy_url"] == "http://jp-proxy:8080"
-
-
-# ============================================================
-# TestPipeline — exact mode integration (creates own TestClient)
-# ============================================================
-
-class TestPipeline:
-    """Pipeline integration test — exact mode passes primary_source via REST."""
-
-    def test_exact_mode_passes_primary_source(self):
-        """REST mode=exact → search_jav() 收到 primary_source（不再被忽略）"""
-        client = TestClient(app)
-
-        captured_kwargs = {}
-
-        def fake_search_jav(number, source='auto', proxy_url='', primary_source='javbus'):
-            captured_kwargs['primary_source'] = primary_source
-            captured_kwargs['proxy_url'] = proxy_url
-            return None  # no result needed; we only check kwargs
-
-        with patch('core.config.load_config', return_value={
-            'search': {
-                'proxy_url': 'http://test-proxy:8080',
-                'primary_source': 'dmm',
-                'uncensored_mode_enabled': False,
-            }
-        }):
-            with patch('web.routers.search.search_jav', side_effect=fake_search_jav):
-                client.get("/api/search", params={"q": "SONE-205", "mode": "exact"})
-
-        assert captured_kwargs.get('primary_source') == 'dmm', (
-            "mode=exact branch must pass primary_source to search_jav(); "
-            f"got {captured_kwargs.get('primary_source')!r}"
-        )
 
 
 # ============================================================

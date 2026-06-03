@@ -42,7 +42,7 @@ def _make_video(source: str, number: str = "TEST-001") -> Video:
 
 
 # ============================================================
-# TestPipeline (13 tests — excluding test_exact_mode_passes_primary_source)
+# TestPipeline — smart_search routing 測試
 # ============================================================
 
 class TestPipeline:
@@ -154,18 +154,18 @@ class TestPipeline:
         mock_d2.assert_not_called()
 
     def test_exact_path_always_fan_out(self):
-        """精確番號路徑一律走 fan-out，不論 primary_source 值或 proxy 是否為空。
+        """精確番號路徑一律走 fan-out，不論 proxy 是否為空。
 
         DMM Top-1 shortcut removed in feature/65; exact path runs Rule 4b (JavBus
         variant probe) first, then falls through to search_jav(auto) fan-out + merge.
-        primary_source='dmm' + proxy_url='' → search_jav(auto) fan-out still called,
+        proxy_url='' → search_jav(auto) fan-out still called,
         DMM simply returns no data (dmm_config=None when proxy empty), merge winner = other source.
         """
         mock_video = _make_video("javbus", "SONE-205")
         with patch('core.scraper.search_jav', return_value=mock_video.to_legacy_dict()) as mock_sj:
             with patch('core.scraper.get_all_variant_ids', return_value=[]):
-                results = smart_search("SONE-205", proxy_url="", primary_source="dmm")
-        # Exact path always calls search_jav(auto) fan-out regardless of primary_source/proxy
+                results = smart_search("SONE-205", proxy_url="")
+        # Exact path always calls search_jav(auto) fan-out regardless of proxy
         mock_sj.assert_called()
 
     def test_merge_winner_first_in_order_dmm(self, monkeypatch):

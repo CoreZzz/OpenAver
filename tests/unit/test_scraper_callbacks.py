@@ -776,7 +776,7 @@ class TestDisabledSourceRouting:
         searched = []
         fc2_result = {'number': 'FC2-PPV-123', 'title': 'FC2'}
 
-        def fake_search_jav(num, source='auto', proxy_url='', primary_source='javbus', javbus_lang=None):
+        def fake_search_jav(num, source='auto', proxy_url='', javbus_lang=None):
             searched.append(source)
             return fc2_result if source == 'fc2' else None
 

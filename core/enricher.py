@@ -252,7 +252,6 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
     write_extrafanart: bool = False,
     overwrite_existing: bool = False,
     proxy_url: str = "",
-    primary_source: str = "javbus",
     source: Optional[str] = None,
     javbus_lang: Optional[str] = None,
     scraper_data: Optional[dict] = None,
@@ -291,7 +290,7 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
 
     if mode == "refresh_full":
         if scraper_data is None:
-            scraper_data = search_jav(number, proxy_url=proxy_url, primary_source=primary_source,
+            scraper_data = search_jav(number, proxy_url=proxy_url,
                                       source=source or 'auto', javbus_lang=javbus_lang)
         if not scraper_data:
             _empty.error = f"找不到 {number} 的資料"
@@ -326,7 +325,7 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
         missing = _missing_fields(meta)
         if missing:
             if scraper_data is None:
-                scraper_data = search_jav(number, proxy_url=proxy_url, primary_source=primary_source,
+                scraper_data = search_jav(number, proxy_url=proxy_url,
                                           source=source or 'auto', javbus_lang=javbus_lang)
             if not scraper_data:
                 _empty.error = f"找不到 {number} 的資料"
@@ -476,7 +475,6 @@ def fetch_samples_only(
     file_path: str,
     number: str,
     proxy_url: str = "",
-    primary_source: str = "javbus",
 ) -> EnrichResult:
     """只補抓劇照：呼叫 scraper → 下載 extrafanart → 更新 DB sample_images。
     不寫 NFO / cover / 其他欄位。
@@ -501,7 +499,7 @@ def fetch_samples_only(
         _empty.error = "檔案不存在"
         return _empty
 
-    meta = search_jav(number, proxy_url=proxy_url, primary_source=primary_source,
+    meta = search_jav(number, proxy_url=proxy_url,
                       source="auto", javbus_lang=None)
     if not meta:
         logger.warning("[fetch_samples_only] 找不到資料: %s", number)

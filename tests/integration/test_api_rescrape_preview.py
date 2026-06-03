@@ -135,8 +135,8 @@ class TestRescrapePreviewEndpoint:
         assert response.status_code == 200
         assert response.json()["success"] is False
 
-    def test_preview_reads_proxy_and_primary_from_search_config(self, client, mocker):
-        """proxy_url / primary_source 從 config['search'] 取得。"""
+    def test_preview_reads_proxy_from_search_config(self, client, mocker):
+        """proxy_url 從 config['search'] 取得。"""
         mock_auto = mocker.patch(
             "web.routers.scraper.search_jav",
             return_value=_scraper_dict(),
@@ -144,7 +144,6 @@ class TestRescrapePreviewEndpoint:
         mocker.patch("web.routers.scraper.load_config", return_value={
             "search": {
                 "proxy_url": "http://proxy.test:8888",
-                "primary_source": "javdb",
             },
         })
 
@@ -155,7 +154,6 @@ class TestRescrapePreviewEndpoint:
 
         kwargs = mock_auto.call_args.kwargs
         assert kwargs.get("proxy_url") == "http://proxy.test:8888"
-        assert kwargs.get("primary_source") == "javdb"
 
     def test_preview_missing_number_returns_422(self, client):
         """漏 number → 422（Pydantic）。"""

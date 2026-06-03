@@ -205,7 +205,7 @@ def _dmm_proxy_url(proxy_url: str) -> str:
 VALID_JAVBUS_LANGS = {'zh-tw', 'ja', 'en'}
 
 
-def search_jav(number: str, source: str = 'auto', proxy_url: str = '', primary_source: str = 'javbus', javbus_lang: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_lang: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     搜尋 JAV 資訊（向後相容函數）
     """
@@ -339,9 +339,8 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', primary_s
         # 單一來源直通：該來源資料原封不動
         main_video = next(iter(all_data.values()))
     else:
-        # auto path: merge follows Active Row drag-sort order (get_enabled_source_ids order);
-        # primary_source is deprecated (CD-61-14) and must NOT override the merge winner —
-        # DMM Top-1 shortcut removed in feature/65; merge winner = first in enabled order.
+        # auto path: merge winner = first source in Active Row drag-sort order
+        # (get_enabled_source_ids order); DMM Top-1 shortcut removed in feature/65.
         user_order = list(all_data.keys())  # already in get_enabled_source_ids() / drag order
         main_video = merge_results(all_data, user_order)
 
@@ -805,7 +804,7 @@ def _get_uncensored_sources(search_term: str) -> list[str]:
     return mt_pick + builtin
 
 
-def smart_search(query: str, limit: int = 20, offset: int = 0, status_callback: Optional[Callable[[str, str], None]] = None, uncensored_mode: bool = False, proxy_url: str = '', result_callback: Optional[Callable[[int, Any], None]] = None, primary_source: str = 'javbus', discovery_only: bool = False) -> List[Dict[str, Any]]:
+def smart_search(query: str, limit: int = 20, offset: int = 0, status_callback: Optional[Callable[[str, str], None]] = None, uncensored_mode: bool = False, proxy_url: str = '', result_callback: Optional[Callable[[int, Any], None]] = None, discovery_only: bool = False) -> List[Dict[str, Any]]:
     """
     智慧搜尋：自動判斷搜尋類型並執行
 

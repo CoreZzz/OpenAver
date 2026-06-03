@@ -179,7 +179,6 @@ def rescrape_preview_endpoint(request: RescrapePreviewRequest) -> dict:
     config = load_config()
     search_cfg = config.get("search", {})
     proxy_url = search_cfg.get("proxy_url", "")
-    primary_source = search_cfg.get("primary_source", "javbus")
 
     try:
         if request.source == "auto":
@@ -187,7 +186,6 @@ def rescrape_preview_endpoint(request: RescrapePreviewRequest) -> dict:
                 request.number,
                 source="auto",
                 proxy_url=proxy_url,
-                primary_source=primary_source,
             )
         else:
             result = search_jav_single_source(
@@ -207,7 +205,6 @@ def enrich_single_endpoint(request: EnrichRequest) -> dict:
     config = load_config()
     search_cfg = config.get("search", {})
     proxy_url = search_cfg.get("proxy_url", "")
-    primary_source = search_cfg.get("primary_source", "javbus")
 
     # CD-62-4 分裂陷阱智慧防呆：refresh_full + overwrite=false 時，若這組設定不會寫出任何
     # sidecar（NFO/cover）卻仍 _db_upsert，就是純分裂。一個 sidecar「會寫」需 write 旗標開 + 檔案缺
@@ -237,7 +234,6 @@ def enrich_single_endpoint(request: EnrichRequest) -> dict:
             write_extrafanart=request.write_extrafanart,
             overwrite_existing=request.overwrite_existing,
             proxy_url=proxy_url,
-            primary_source=primary_source,
             source=request.source,
             javbus_lang=request.javbus_lang,
         )
@@ -258,7 +254,6 @@ def fetch_samples_endpoint(req: FetchSamplesRequest) -> dict:
     config = load_config()
     search_cfg = config.get("search", {})
     proxy_url = search_cfg.get("proxy_url", "")
-    primary_source = search_cfg.get("primary_source", "javbus")
 
     folder_uri_prefix = to_file_uri(os.path.dirname(uri_to_fs_path(req.file_path))) + "/"
     repo = VideoRepository()
@@ -271,7 +266,6 @@ def fetch_samples_endpoint(req: FetchSamplesRequest) -> dict:
             file_path=req.file_path,
             number=req.number,
             proxy_url=proxy_url,
-            primary_source=primary_source,
         )
         from dataclasses import asdict
         return asdict(result)
@@ -289,7 +283,6 @@ async def batch_enrich_endpoint(request: BatchEnrichRequest):
     config = load_config()
     search_cfg = config.get("search", {})
     proxy_url = search_cfg.get("proxy_url", "")
-    primary_source = search_cfg.get("primary_source", "javbus")
 
     # 去重（按 file_path）
     seen_paths: set = set()
@@ -344,7 +337,6 @@ async def batch_enrich_endpoint(request: BatchEnrichRequest):
                                     n,
                                     source=es,
                                     proxy_url=proxy_url,
-                                    primary_source=primary_source,
                                     javbus_lang=el,
                                 ),
                             )
@@ -365,7 +357,6 @@ async def batch_enrich_endpoint(request: BatchEnrichRequest):
                             write_extrafanart=request.write_extrafanart,
                             overwrite_existing=request.overwrite_existing,
                             proxy_url=proxy_url,
-                            primary_source=primary_source,
                             source=effective_source if effective_source != "auto" else None,
                             javbus_lang=effective_lang,
                             scraper_data=sd,

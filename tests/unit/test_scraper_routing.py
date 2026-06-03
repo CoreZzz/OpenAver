@@ -428,7 +428,6 @@ class TestApiEchoStrip:
             with patch("core.config.load_config", return_value={
                 'search': {
                     'proxy_url': '',
-                    'primary_source': 'javbus',
                     'uncensored_mode_enabled': False,
                 }
             }):
@@ -457,7 +456,6 @@ class TestApiEchoStrip:
             with patch("core.config.load_config", return_value={
                 'search': {
                     'proxy_url': '',
-                    'primary_source': 'javbus',
                     'uncensored_mode_enabled': False,
                 }
             }):

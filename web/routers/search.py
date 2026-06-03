@@ -192,7 +192,6 @@ def search(
     config = load_config()
     uncensored_mode = is_uncensored_mode_effective(config)
     proxy_url = config.get('search', {}).get('proxy_url', '')
-    primary_source = config.get('search', {}).get('primary_source', 'javbus')
 
     # discovery 僅在明確指定 actress/partial/prefix 模式時生效
     # auto 不含：auto 內部自動選路，discovery_only 會干擾 keyword fallback
@@ -200,7 +199,7 @@ def search(
 
     # 自動模式使用 smart_search
     if mode == "auto":
-        results = smart_search(q, limit=limit, offset=offset, uncensored_mode=uncensored_mode, proxy_url=proxy_url, primary_source=primary_source, discovery_only=use_discovery)
+        results = smart_search(q, limit=limit, offset=offset, uncensored_mode=uncensored_mode, proxy_url=proxy_url, discovery_only=use_discovery)
     elif mode == "exact":
         if source:
             # 指定來源搜索
@@ -209,7 +208,7 @@ def search(
             results = [data] if data else []
         else:
             # 精確搜索（使用 smart_search 的 exact 模式）
-            data = search_jav(q, proxy_url=proxy_url, primary_source=primary_source)
+            data = search_jav(q, proxy_url=proxy_url)
             results = [data] if data else []
     elif mode == "partial":
         results = search_partial(q, discovery_only=use_discovery)
@@ -468,13 +467,12 @@ def batch_search(body: BatchSearchRequest) -> dict:
     from core.config import load_config
     config = load_config()
     proxy_url = config.get('search', {}).get('proxy_url', '')
-    primary_source = config.get('search', {}).get('primary_source', 'javbus')
 
     results = {}
 
     def _search_one(num: str):
         try:
-            data = smart_search(num, limit=1, proxy_url=proxy_url, primary_source=primary_source)
+            data = smart_search(num, limit=1, proxy_url=proxy_url)
             if data:
                 entry = strip_internal_nfo_keys(data[0])
                 entry['found'] = True
@@ -528,7 +526,6 @@ async def search_stream(
     config = load_config()
     uncensored_mode = is_uncensored_mode_effective(config)
     proxy_url = config.get('search', {}).get('proxy_url', '')
-    primary_source = config.get('search', {}).get('primary_source', 'javbus')
 
     status_queue = Queue()
     sent_seed = False
@@ -552,7 +549,7 @@ async def search_stream(
 
     def run_search():
         """在背景執行搜尋"""
-        return smart_search(q, limit=limit, offset=offset, status_callback=status_callback, uncensored_mode=uncensored_mode, proxy_url=proxy_url, result_callback=result_callback, primary_source=primary_source)
+        return smart_search(q, limit=limit, offset=offset, status_callback=status_callback, uncensored_mode=uncensored_mode, proxy_url=proxy_url, result_callback=result_callback)
 
     async def event_generator():
         nonlocal sent_seed
