@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] - 2026-06-04
+
+本版單一主軸：讓「掃描來源」頁的 **Active Row 拖曳順序成為所有搜尋路由的唯一真理**，徹底移除 `primary_source` 概念。改完後邏輯收斂成一句話：**順序就是一切**。先前搜尋路由其實有兩套真理在打架——拖曳順序（auto 合併早已照它走）vs. 殘留的 `primary_source` 欄位（Settings 底部那塊標「已停用設定」的 radio，但對精準 DMM 短路與模糊 routing 仍暗中 live）。本版把這個會誤導人的隱性 gap 連根拔除：**精準搜尋**拔掉 DMM 整包短路（Rule 4a）、封面改跟 Active Row 順序（移除 hardcode 反浮水印優先序）、只用啟用中來源；**模糊搜尋**（女優名/關鍵字）從寫死 dmm/javbus 改成照 Active Row 順序的 fallback 鏈（循序試、命中即停、always-on 無視啟用），候選池實測收斂為 javbus + dmm（jav321 keyword 恆回空、javdb 連續模糊呼叫會被 Cloudflare ban）；**進階搜尋**（picker 單源覆寫）維持原樣不動。`primary_source` 從 schema 欄位、config 預設、no-op 傳遞點、Settings radio UI 到舊 config key 全清（含一次性 strip migration），Help 補一句說明「模糊鏈 always-on：停用的來源仍會被模糊搜尋用到」。
+
+*This release has one theme: make the Scan-Sources page's **Active Row drag-order the sole source of truth for all search routing**, fully removing the `primary_source` concept — "order is everything." Routing previously had two competing truths: drag-order (which auto-merge already followed) vs. a residual `primary_source` field (the "deprecated setting" radio at the bottom of Settings, still secretly live for the exact-search DMM short-circuit and fuzzy routing). This misleading hidden gap is removed at the root: **exact search** drops the DMM whole-result short-circuit (Rule 4a), covers now follow Active Row order (hardcoded anti-watermark priority removed), and only enabled sources participate; **fuzzy search** (actress/keyword) changes from hardcoded dmm/javbus to an Active-Row-ordered fallback chain (try-in-order, stop-on-hit, always-on regardless of enabled state), with the candidate pool empirically narrowed to javbus + dmm (jav321 keyword always returns empty; javdb gets Cloudflare-banned on repeated fuzzy calls); **advanced search** (picker single-source override) is unchanged. `primary_source` is purged from the schema field, config default, no-op pass-through call sites, the Settings radio UI, and old config keys (with a one-time strip migration). Help gains a note that the fuzzy chain is always-on — disabled sources are still used by fuzzy search.*
+
+### Changed
+
+#### 🎯 精準搜尋（番號）— 完全照 Active Row 順序
+- **拔掉 DMM 短路（Rule 4a）**：`smart_search` 不再有 DMM 整包短路分支；一律走 fan-out + merge，Active Row 順序第一個有結果的來源整包為主、缺欄往後補
+- **封面跟順序**：合併封面改吃 `user_order`（移除 `DEFAULT_COVER_PRIORITY` 與 `cover_priority` 參數的硬編碼 `javbus→jav321→javdb` 優先序）；想要反浮水印封面把該來源排前面即可
+- **只用啟用中來源**：精準搜尋只考慮 Active Row 啟用中的來源（停用過濾）
+
+#### 🔍 模糊搜尋（女優名/關鍵字）— 照順序的 fallback 鏈
+- **有序 fallback 鏈**：依 `get_all_source_ids_ordered()`（含停用來源）∩ 候選池循序試，回空/不可用往下、命中即停，不 fan-out、不需 dedup
+- **always-on**：模糊鏈無視啟用——停用的候選池來源仍照順序被使用（與精準的「啟用過濾」刻意不同；Help 已揭露）
+- **候選池收斂為 javbus + dmm**：實測 jav321 keyword 搜尋恆回空、javdb 連續模糊呼叫觸發 Cloudflare/IP ban → 從候選池移除（兩者在精準番號搜尋與封面 merge 仍照常使用）；AVSOX 仍排除（無碼專用）
+- **保住 javbus 獨有能力**：DMM 排前面但無 proxy / 打中文女優名回空時，鏈續試 javbus（無 proxy 直連 + 吃中文名）
+
+### Added
+- **Help 模糊 always-on 揭露**：Help「來源啟停與排序」段補一句「模糊搜尋例外：用女優名／關鍵字模糊搜尋時，即使來源被停用仍會照排序被用到（停用只影響番號精準搜尋）」（zh_TW 先行）
+
+### Removed
+- **`primary_source` 概念徹底移除**：`SearchConfig.primary_source` 欄位 + `web/config.default.json` 預設值 + `search_jav`/`smart_search`/`search_actress`/enricher/router 的 no-op 傳遞點與簽章參數全清
+- **Settings「預設搜尋來源（已停用設定）」radio block**：`source-badges-row` 複合元件（radio + CENSORED/UNCENSORED badge 列 + 說明）+ `state-config.js` 的 `primarySource`/`SOURCE_NAMES`/`UNCENSORED_SOURCES`/`isSourceActive` + `settings.css` Source Badges section + design-system D.10 demo + zh_TW 兩個 deprecated key 全拔（`isDmmAvailable`/`CENSORED_SOURCES` 保留，Active Row 仍用）
+
+### Fixed / Internal
+- **strip migration**：`load_config()` 直接 return raw dict 不經 Pydantic validate，舊 `config.json` 殘留的 `primary_source` key 不會被自動剝除 → `core/config.py` 加一次性 strip（載入時 `del` + 觸發 save）
+- **`_fuzzy_one` 統一 adapter**：四源 keyword 入口（DMM None→[]、JavDB Video→dict、JavBus 抽 `_javbus_keyword_search`）歸一為 `list[dict]`；`search_actress` 改 thin wrapper；seed 僅由首發動源送一次；DMM `_source='dmm'` 補齊與 javbus 一致（內部欄位）
+- **無碼模式 × 模糊回空**：維持現況「安靜回空」+ 加設計意圖註解（無碼模式下模糊搜尋預期回空，非 bug）；AVSOX `search_by_keyword` 標 dead-code 註解
+
+### 測試
+- 既有 routing 測試**改寫**反映新行為（不靠舊短路綠燈）：`test_pipeline_routing`（拔 DMM-first 短路、改 fan-out / 模糊鏈）、`test_source_merger`（封面跟 user_order）、`test_core_config`（strip migration）、`test_scraper_callbacks`/`test_new_scrapers`/`test_api_enrich`/`test_api_rescrape_preview`（移除 primary_source 斷言）
+- 新增 `test_fuzzy_chain.py`（鏈順序 / 候選池過濾 / DMM 無 proxy fallback / always-on 停用仍用 / 非模糊源跳過 / seed-once / dmm `_source`）+ `test_source_settings.py`（`FUZZY_SEARCH_SOURCES` 內容）
+- 移除過時前端守衛 `test_primary_source_deprecated_marker`（[transient-guard]，被守的 deprecated block 已拔除）
+- 全套 pytest **3464 passed, 2 skipped**（unit + integration，排除 smoke / e2e）+ `npm run lint`（eslint + stylelint）綠
+
+### i18n
+- 本版交付 zh_TW 文案（`help.scraper.fuzzy_always_on`）；移除 zh_TW 的 `primary_source_deprecated_hint`/`note` + dangling `settings.search.default_source_hint`；其他 3 語系（zh_CN / en / ja）的對應 key 差異依專案 i18n 規範**待 milestone 同步**
+
+### 已知行為（非本版範圍）
+- **JavBus 變體探測（Rule 4b，feature/61 既有）仍在**：精準搜番號時，javbus 啟用且該番號有 variant 記錄（多數主流番號）→ javbus 整包早退、無視 Active Row 順序。本版只拔 DMM 短路（Rule 4a），未動 variant probe；故「精準搜順序就是一切」在 javbus 啟用且有該番號時不完全成立（variant probe 同時驅動版本切換器，需一併考量），留待後續獨立 branch 評估。
+
 ## [0.9.3] - 2026-06-03
 
 本版是 v0.9 scraper-federation epic 三段（B1/B2/B3）全部 ship 後的 **UX 收斂插入段**（feature/64-settings-help-ux-polish，排在 javlibrary B4 之前），純前端、不動任何後端行為。連續三段堆功能留下幾處 UX 粗糙邊，本段一次收齊：**A — 進階重刮 picker metatube 膠囊三態語意修正**（可達的 metatube 來源不再被畫成 disabled 灰底刪除線，只有真的連不上才 offline 樣式；搜尋情境彈窗標題改「進階搜尋」）；**B — Settings IA 退回單欄三分類**（v0.9.0 的 6-tab 拆掉，進階回歸各 section 內嵌摺疊，舊用戶熟悉的「一長條 + 進階就在功能旁」手感回來；header 下新增 quick-toggle 列放下載劇照 + 進階搜尋；搜尋來源卡版面微調）；**C — Help 內容修正 + metatube 教學卡**（進階搜尋說明併進 Search 卡）；**D — 移除 dev-only `/settings-mock` POC**（route/template/i18n/guard 全清）。收尾 64e 再做一輪精修：quick-toggle label 去括號 + 進階搜尋 Beta 改膠囊 + 說明改 help-popover（列全 5 入口）、無碼 batchbar 改 segmented 雙段控件（全開｜無碼）+ 計數器移右、刪常駐 footnote、DMM proxy row 搬到 metatube 連線區正上方、Help picker 補完整 5 入口。
