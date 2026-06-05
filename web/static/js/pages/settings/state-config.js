@@ -8,6 +8,11 @@ export function stateConfig() {
             // Search
             searchFavoriteFolder: '',
             proxyUrl: '',
+            sourceMode: 'enabled',
+            customSourceIds: [],
+            tryAllAliases: true,
+            maxSourcesPerSearch: 10,
+            maxQueriesPerSource: 3,
             advancedSearchEnabled: false,  // 進階搜尋 picker（TASK-61c-7，top-level config 欄位）
 
             // Translate
@@ -33,6 +38,16 @@ export function stateConfig() {
             suffixKeywords: [],
             jellyfinMode: false,
             downloadSampleImages: false,
+
+            // Sidecar
+            sidecarMode: 'alongside',
+            sidecarRootDir: '',
+            sidecarLayout: '{maker}/{num}',
+            sidecarNfoFilename: '{num}.nfo',
+            sidecarCoverFilename: 'cover.jpg',
+            sidecarPosterFilename: 'poster.jpg',
+            sidecarFanartFilename: 'fanart.jpg',
+            sidecarExtrafanartDir: 'extrafanart',
 
             // Gallery
             avlistMode: 'image',
@@ -128,6 +143,8 @@ export function stateConfig() {
         },
         FOLDER_PREVIEW_DATA: {
             num: 'SSNI-618',
+            number: 'SSNI-618',
+            stem: 'SSNI-618',
             maker: 'SOD',
             actor: '三上悠亞',
             actors: '三上悠亞, 明日花',
@@ -185,6 +202,32 @@ export function stateConfig() {
             return folder + filenamePreview + '.mp4';
         },
 
+        get sidecarPreviewRows() {
+            if (this.form.sidecarMode !== 'centralized') return [];
+
+            const root = this.form.sidecarRootDir.trim()
+                || window.t('settings.sidecar.preview_root_missing');
+            const baseParts = this._renderSidecarLayout(this.form.sidecarLayout || '{maker}/{num}');
+            const baseDir = this._joinDisplayPath(root, ...baseParts);
+            const nfoName = this._renderSidecarFilename(this.form.sidecarNfoFilename, '{num}.nfo');
+            const coverName = this._renderSidecarFilename(this.form.sidecarCoverFilename, 'cover.jpg');
+            const posterName = this._renderSidecarFilename(this.form.sidecarPosterFilename, 'poster.jpg');
+            const fanartName = this._renderSidecarFilename(this.form.sidecarFanartFilename, 'fanart.jpg');
+            const extrafanartName = this._sanitizeSidecarComponent(
+                this._renderSidecarTemplate(this.form.sidecarExtrafanartDir || 'extrafanart'),
+                'extrafanart'
+            );
+
+            return [
+                { key: 'base', label: window.t('settings.sidecar.preview_base_dir'), value: baseDir },
+                { key: 'nfo', label: window.t('settings.sidecar.preview_nfo_path'), value: this._joinDisplayPath(baseDir, nfoName) },
+                { key: 'cover', label: window.t('settings.sidecar.preview_cover_path'), value: this._joinDisplayPath(baseDir, coverName) },
+                { key: 'poster', label: window.t('settings.sidecar.preview_poster_path'), value: this._joinDisplayPath(baseDir, posterName) },
+                { key: 'fanart', label: window.t('settings.sidecar.preview_fanart_path'), value: this._joinDisplayPath(baseDir, fanartName) },
+                { key: 'extrafanart', label: window.t('settings.sidecar.preview_extrafanart_dir'), value: this._joinDisplayPath(baseDir, extrafanartName) },
+            ];
+        },
+
         // ===== Sources computed (61c-2) =====
         // Cap basis（counter + promote/toggle 守衛）。**不看 available**（design §2.2 —
         // 斷線 metatube 仍占槽，避免重連後 cap 暴衝）。manual_only 不計入。
@@ -213,6 +256,29 @@ export function stateConfig() {
                 .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         },
 
+        get sourceModeOptions() {
+            return [
+                { value: 'enabled', icon: 'bi-check2-circle', label: window.t('settings.sources.source_mode_enabled') },
+                { value: 'censored', icon: 'bi-badge-hd', label: window.t('settings.sources.source_mode_censored') },
+                { value: 'uncensored', icon: 'bi-unlock', label: window.t('settings.sources.source_mode_uncensored') },
+                { value: 'all', icon: 'bi-grid-3x3-gap', label: window.t('settings.sources.source_mode_all') },
+                { value: 'custom', icon: 'bi-sliders2', label: window.t('settings.sources.source_mode_custom') },
+            ];
+        },
+
+        get searchSelectableSources() {
+            return this.sources
+                .filter(s => !s.manual_only && !s.is_beta)
+                .slice()
+                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        },
+
+        get customSelectedCount() {
+            return this.form.customSourceIds.filter(id =>
+                this.searchSelectableSources.some(s => s.id === id)
+            ).length;
+        },
+
         // 是否無碼來源（供膠囊有碼/無碼配色）。讀後端 computed is_censored 欄位。
         isUncensored(src) {
             return !src.is_censored;
@@ -230,6 +296,8 @@ export function stateConfig() {
         },
 
         get uncensoredMode() {
+            if (this.form.sourceMode === 'uncensored') return true;
+            if (['censored', 'all', 'custom'].includes(this.form.sourceMode)) return false;
             const censored = this.sources.filter(s => this.CENSORED_SOURCES.includes(s.id));
             return censored.length > 0 && censored.every(s => !s.enabled);
         },
@@ -237,14 +305,9 @@ export function stateConfig() {
         // setter(false) = NO-OP + transient hint（EC-2：off 不自動重開有碼，由使用者手動重啟任一有碼 pill）。
         set uncensoredMode(v) {
             if (v === true) {
-                this.sources.forEach(s => {
-                    if (this.CENSORED_SOURCES.includes(s.id) && !s.manual_only) {
-                        s.enabled = false;
-                    }
-                });
-                this.saveConfig();
+                this.setSourceMode('uncensored');
             } else {
-                this._flashUncensoredOffHint();
+                this.setSourceMode('enabled');
             }
         },
         _flashUncensoredOffHint() {
@@ -262,6 +325,31 @@ export function stateConfig() {
         canPromote(src) {
             return !!src && !src.enabled && !src.manual_only
                 && this.enabledCount < MAX_ENABLED_SOURCES;
+        },
+
+        setSourceMode(mode) {
+            if (!['enabled', 'censored', 'uncensored', 'all', 'custom'].includes(mode)) return;
+            this.form.sourceMode = mode;
+            if (mode === 'custom' && this.form.customSourceIds.length === 0) {
+                this.form.customSourceIds = this.sources
+                    .filter(s => s.enabled && !s.manual_only && !s.is_beta)
+                    .map(s => s.id);
+            }
+            this.saveConfig();
+        },
+
+        isCustomSourceSelected(id) {
+            return this.form.customSourceIds.includes(id);
+        },
+
+        toggleCustomSource(id, checked) {
+            const next = new Set(this.form.customSourceIds);
+            if (checked) {
+                next.add(id);
+            } else {
+                next.delete(id);
+            }
+            this.form.customSourceIds = Array.from(next);
         },
 
         // metatube 已啟用但不可用 = 「斷線」（灰化 + 刪除線 + m 角標 + click toast；§2.4 / EC-9）。
@@ -282,6 +370,33 @@ export function stateConfig() {
          */
         isDmmAvailable() {
             return !!this.form.proxyUrl.trim();
+        },
+
+        /**
+         * 來源是否啟用（決定 badge 亮度）
+         * - 有碼來源：無碼模式關閉時啟用
+         * - 無碼來源：無碼模式開啟時啟用
+         * - DMM：有碼模式 + proxy 有值才亮
+         */
+        isSourceActive(src) {
+            if (this.form.sourceMode === 'all') return src !== 'dmm' || this.isDmmAvailable();
+            if (this.form.sourceMode === 'custom') {
+                return this.form.customSourceIds.includes(src) && (src !== 'dmm' || this.isDmmAvailable());
+            }
+            if (this.form.sourceMode === 'censored') return this.CENSORED_SOURCES.includes(src) && (src !== 'dmm' || this.isDmmAvailable());
+            if (this.form.sourceMode === 'uncensored') return this.UNCENSORED_SOURCES.includes(src);
+
+            const configured = this.sources.find(s => s.id === src);
+            if (configured) return configured.enabled && (src !== 'dmm' || this.isDmmAvailable());
+
+            const isUncensored = this.UNCENSORED_SOURCES.includes(src);
+            if (isUncensored) {
+                return this.uncensoredMode;
+            }
+            if (src === 'dmm') {
+                return !this.uncensoredMode && !!this.form.proxyUrl.trim();
+            }
+            return !this.uncensoredMode;
         },
 
         // ===== Lifecycle =====
@@ -377,6 +492,13 @@ export function stateConfig() {
                     // 61c-3: uncensoredMode 由 sources 段推導（computed getter），不再單獨讀 uncensored_mode_enabled。
                     this.form.searchFavoriteFolder = config.search?.favorite_folder || '';
                     this.form.proxyUrl = config.search?.proxy_url || '';
+                    this.form.sourceMode = ['enabled', 'censored', 'uncensored', 'all', 'custom'].includes(config.search?.source_mode)
+                        ? config.search.source_mode
+                        : 'enabled';
+                    this.form.customSourceIds = config.search?.custom_source_ids || [];
+                    this.form.tryAllAliases = config.search?.try_all_aliases ?? true;
+                    this.form.maxSourcesPerSearch = config.search?.max_sources_per_search ?? MAX_ENABLED_SOURCES;
+                    this.form.maxQueriesPerSource = config.search?.max_queries_per_source ?? 3;
                     // 進階搜尋（TASK-61c-7）：top-level bool 欄位
                     this.form.advancedSearchEnabled = config.advanced_search_enabled || false;
 
@@ -430,6 +552,16 @@ export function stateConfig() {
                     this.form.suffixKeywords = config.scraper?.suffix_keywords || ['-cd1', '-cd2', '-4k', '-uc'];
                     this.form.jellyfinMode = config.scraper?.jellyfin_mode || false;
                     this.form.downloadSampleImages = config.scraper?.download_sample_images || false;
+
+                    // Sidecar
+                    this.form.sidecarMode = config.sidecar?.mode || 'alongside';
+                    this.form.sidecarRootDir = config.sidecar?.root_dir || '';
+                    this.form.sidecarLayout = config.sidecar?.layout || '{maker}/{num}';
+                    this.form.sidecarNfoFilename = config.sidecar?.nfo_filename || '{num}.nfo';
+                    this.form.sidecarCoverFilename = config.sidecar?.cover_filename || 'cover.jpg';
+                    this.form.sidecarPosterFilename = config.sidecar?.poster_filename || 'poster.jpg';
+                    this.form.sidecarFanartFilename = config.sidecar?.fanart_filename || 'fanart.jpg';
+                    this.form.sidecarExtrafanartDir = config.sidecar?.extrafanart_dir || 'extrafanart';
 
                     // Gallery
                     this.form.avlistMode = config.gallery?.default_mode || 'image';
@@ -503,6 +635,11 @@ export function stateConfig() {
 
         async saveConfig() {
             try {
+                if (this.form.sidecarMode === 'centralized' && !this.form.sidecarRootDir.trim()) {
+                    this.showToast(window.t('settings.sidecar.root_required'), 'warning');
+                    return;
+                }
+
                 // 先載入現有設定
                 const currentResp = await fetch('/api/config');
                 const currentResult = await currentResp.json();
@@ -534,12 +671,51 @@ export function stateConfig() {
                     download_sample_images: this.form.downloadSampleImages,
                 };
 
+                const validSourceModes = ['enabled', 'censored', 'uncensored', 'all', 'custom'];
+                const sourceMode = validSourceModes.includes(this.form.sourceMode)
+                    ? this.form.sourceMode
+                    : 'enabled';
+                const maxSourcesPerSearch = Math.max(
+                    1,
+                    Math.min(
+                        MAX_ENABLED_SOURCES,
+                        Number(this.form.maxSourcesPerSearch) || MAX_ENABLED_SOURCES
+                    )
+                );
+                const maxQueriesPerSource = Math.max(
+                    1,
+                    Math.min(8, Number(this.form.maxQueriesPerSource) || 1)
+                );
+                this.form.sourceMode = sourceMode;
+                this.form.maxSourcesPerSearch = maxSourcesPerSearch;
+                this.form.maxQueriesPerSource = maxQueriesPerSource;
+
                 // 更新 search
                 config.search = {
                     ...config.search,
                     uncensored_mode_enabled: this.uncensoredMode,
                     favorite_folder: this.form.searchFavoriteFolder.trim(),
                     proxy_url: this.form.proxyUrl.trim(),
+                    source_mode: sourceMode,
+                    custom_source_ids: this.form.customSourceIds.filter(id =>
+                        this.searchSelectableSources.some(s => s.id === id)
+                    ),
+                    try_all_aliases: !!this.form.tryAllAliases,
+                    max_sources_per_search: maxSourcesPerSearch,
+                    max_queries_per_source: maxQueriesPerSource,
+                };
+
+                // 更新 sidecar
+                config.sidecar = {
+                    ...(config.sidecar || {}),
+                    mode: this.form.sidecarMode === 'centralized' ? 'centralized' : 'alongside',
+                    root_dir: this.form.sidecarRootDir.trim(),
+                    layout: this.form.sidecarLayout.trim() || '{maker}/{num}',
+                    nfo_filename: this.form.sidecarNfoFilename.trim() || '{num}.nfo',
+                    cover_filename: this.form.sidecarCoverFilename.trim() || 'cover.jpg',
+                    poster_filename: this.form.sidecarPosterFilename.trim() || 'poster.jpg',
+                    fanart_filename: this.form.sidecarFanartFilename.trim() || 'fanart.jpg',
+                    extrafanart_dir: this.form.sidecarExtrafanartDir.trim() || 'extrafanart',
                 };
 
                 // 進階搜尋（TASK-61c-7）：top-level bool 欄位（與 nested 區塊並列）
@@ -701,6 +877,51 @@ export function stateConfig() {
                 html = html.replaceAll(v.name, `<span class="tag-badge">${v.label}</span>`);
             }
             return html;
+        },
+
+        _renderSidecarTemplate(template) {
+            let result = String(template || '');
+            for (const [key, val] of Object.entries(this.FOLDER_PREVIEW_DATA)) {
+                result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), val);
+            }
+            return result;
+        },
+
+        _sanitizeSidecarComponent(value, fallback = '') {
+            const cleaned = String(value || '')
+                .replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .replace(/[. ]+$/g, '');
+            return cleaned || fallback;
+        },
+
+        _renderSidecarLayout(template) {
+            const rendered = this._renderSidecarTemplate(template || '{num}');
+            const parts = rendered
+                .split(/[\\/]+/)
+                .map(part => this._sanitizeSidecarComponent(part, ''))
+                .filter(Boolean);
+            return parts.length ? parts : [this._sanitizeSidecarComponent(this.FOLDER_PREVIEW_DATA.num, 'unknown')];
+        },
+
+        _renderSidecarFilename(template, fallback) {
+            return this._sanitizeSidecarComponent(this._renderSidecarTemplate(template || fallback), fallback);
+        },
+
+        _joinDisplayPath(...parts) {
+            const cleanParts = parts
+                .map(part => String(part || '').trim())
+                .filter(Boolean);
+            if (cleanParts.length === 0) return '';
+            return cleanParts
+                .map((part, index) => {
+                    const normalized = part.replace(/\\/g, '/');
+                    if (index === 0) return normalized.replace(/\/+$/g, '');
+                    return normalized.replace(/^\/+|\/+$/g, '');
+                })
+                .filter(Boolean)
+                .join('/');
         },
 
         addSuffix() {

@@ -28,7 +28,22 @@
     "search_filter": "",
     "uncensored_mode_enabled": false,
     "favorite_folder": "",
-    "proxy_url": ""
+    "proxy_url": "",
+    "source_mode": "enabled",
+    "custom_source_ids": [],
+    "try_all_aliases": true,
+    "max_sources_per_search": 10,
+    "max_queries_per_source": 3
+  },
+  "sidecar": {
+    "mode": "alongside",
+    "root_dir": "",
+    "layout": "{maker}/{num}",
+    "nfo_filename": "{num}.nfo",
+    "cover_filename": "cover.jpg",
+    "poster_filename": "poster.jpg",
+    "fanart_filename": "fanart.jpg",
+    "extrafanart_dir": "extrafanart"
   },
   "source_links": {
     "dmm": true,
@@ -55,6 +70,7 @@
   },
   "gallery": {
     "directories": [],
+    "directory_labels": {},
     "output_dir": "output",
     "output_filename": "gallery_output.html",
     "path_mappings": {},

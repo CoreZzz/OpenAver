@@ -23,6 +23,8 @@ import json
 import os
 import sys
 import time
+import threading
+import uuid
 import requests
 from datetime import datetime
 from urllib.parse import unquote, quote
@@ -38,9 +40,12 @@ from core.gallery_generator import HTMLGenerator
 from core.path_utils import normalize_path, to_file_uri, is_path_under_dir, uri_to_fs_path
 from core.nfo_updater import check_cache_needs_update, update_videos_generator
 from core.database import VideoRepository, Video, init_db, get_db_path, migrate_json_to_sqlite
+from core.enricher import enrich_single
+from core.filename_identity import parse_media_identity
 from core.organizer import generate_jellyfin_images, HEADERS as _EMBED_HEADERS
 from core.config import load_config
 from core.scraper import smart_search
+from core.sidecar_paths import resolve_sidecar_paths
 from core.source_settings import is_uncensored_mode_effective
 from pydantic import BaseModel
 from core.logger import get_logger
@@ -53,11 +58,197 @@ router = APIRouter(prefix="/api/gallery", tags=["gallery"])
 # T3(40c): Jellyfin check TTL 快取（60 秒）
 _jellyfin_cache_result: dict | None = None
 _jellyfin_cache_time: float = 0
+_missing_enrich_lock = threading.RLock()
+_missing_enrich_job: dict[str, Any] | None = None
+_missing_enrich_thread: threading.Thread | None = None
+_missing_enrich_log_seq = 0
+_MISSING_ENRICH_LOG_LIMIT = 200
+_MISSING_ENRICH_RUNNING_STATES = {"running"}
 
 
 def _sse_event(data: dict) -> str:
     """將 dict 編碼為 SSE 格式的單條 message。"""
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+class MissingEnrichItem(BaseModel):
+    file_path: str
+    number: str
+
+
+class MissingEnrichStartRequest(BaseModel):
+    items: List[MissingEnrichItem]
+
+
+def _canonical_number_or_original(value: str | None) -> str | None:
+    if not value:
+        return value
+    identity = parse_media_identity(value)
+    return identity.search_number or identity.canonical_number or str(value).strip().upper()
+
+
+def _missing_enrich_status_snapshot() -> dict:
+    with _missing_enrich_lock:
+        if _missing_enrich_job is None:
+            return {"state": "idle"}
+        return {
+            "job_id": _missing_enrich_job["job_id"],
+            "state": _missing_enrich_job["state"],
+            "current": _missing_enrich_job["current"],
+            "total": _missing_enrich_job["total"],
+            "success_count": _missing_enrich_job["success_count"],
+            "failed_count": _missing_enrich_job["failed_count"],
+            "message": _missing_enrich_job["message"],
+            "logs": list(_missing_enrich_job["logs"]),
+            "started_at": _missing_enrich_job["started_at"],
+            "finished_at": _missing_enrich_job["finished_at"],
+        }
+
+
+def _update_missing_enrich_job(job: dict, **values) -> None:
+    with _missing_enrich_lock:
+        if _missing_enrich_job is not job:
+            return
+        job.update(values)
+
+
+def _append_missing_enrich_log(job: dict, level: str, message: str) -> None:
+    global _missing_enrich_log_seq
+    with _missing_enrich_lock:
+        if _missing_enrich_job is not job:
+            return
+        _missing_enrich_log_seq += 1
+        job["logs"].append({
+            "seq": _missing_enrich_log_seq,
+            "timestamp": time.time(),
+            "level": level,
+            "message": message,
+        })
+        if len(job["logs"]) > _MISSING_ENRICH_LOG_LIMIT:
+            del job["logs"][:len(job["logs"]) - _MISSING_ENRICH_LOG_LIMIT]
+
+
+def _dedupe_missing_enrich_items(raw_items: List[MissingEnrichItem]) -> list[dict[str, str]]:
+    seen_paths = set()
+    items: list[dict[str, str]] = []
+    for item in raw_items:
+        file_path = str(item.file_path or "").strip()
+        number = str(item.number or "").strip()
+        if not file_path or not number or file_path in seen_paths:
+            continue
+        seen_paths.add(file_path)
+        items.append({"file_path": file_path, "number": number})
+    return items
+
+
+def _run_missing_enrich_job(job: dict, items: list[dict[str, str]]) -> None:
+    total = len(items)
+
+    try:
+        config = load_config()
+        search_cfg = config.get("search", {}) if isinstance(config, dict) else {}
+        proxy_url = search_cfg.get("proxy_url", "")
+
+        _emit_notif(
+            "info",
+            "notif.batch_enrich_started",
+            message=f"共 {total} 部",
+            task_type="batch_enrich",
+        )
+        _append_missing_enrich_log(job, "info", f"補全開始，共 {total} 部")
+
+        if total == 0:
+            _update_missing_enrich_job(
+                job,
+                state="done",
+                current=0,
+                message="沒有需要補全的影片",
+                finished_at=time.time(),
+            )
+            return
+
+        for idx, item in enumerate(items, start=1):
+            number = _canonical_number_or_original(item["number"]) or item["number"]
+            _update_missing_enrich_job(
+                job,
+                current=idx - 1,
+                message=f"補全中 {idx}/{total}: {number}",
+            )
+
+            try:
+                result = enrich_single(
+                    file_path=item["file_path"],
+                    number=number,
+                    mode="fill_missing",
+                    write_nfo=True,
+                    write_cover=True,
+                    write_extrafanart=False,
+                    overwrite_existing=False,
+                    proxy_url=proxy_url,
+                    source=None,
+                    javbus_lang=None,
+                    sidecar_config=config,
+                )
+                success = bool(getattr(result, "success", False))
+            except Exception:
+                logger.exception("missing enrich item 失敗 number=%s", number)
+                success = False
+
+            with _missing_enrich_lock:
+                if _missing_enrich_job is not job:
+                    return
+                if success:
+                    job["success_count"] += 1
+                    level = "info"
+                    message = f"補全成功: {number}"
+                else:
+                    job["failed_count"] += 1
+                    level = "warn"
+                    message = f"補全失敗: {number}"
+                job["current"] = idx
+
+            _append_missing_enrich_log(job, level, message)
+
+        with _missing_enrich_lock:
+            success_count = job["success_count"]
+            failed_count = job["failed_count"]
+            final_message = "補全完成" if failed_count == 0 else "補全完成（部分失敗）"
+            if _missing_enrich_job is job:
+                job.update({
+                    "state": "done",
+                    "message": final_message,
+                    "finished_at": time.time(),
+                })
+
+        if failed_count > 0:
+            _emit_notif(
+                "warn",
+                "notif.batch_enrich_done_with_errors",
+                message=f"補完 {success_count} 部，{failed_count} 部失敗",
+                task_type="batch_enrich",
+            )
+        else:
+            _emit_notif(
+                "success",
+                "notif.batch_enrich_done",
+                message=f"補完 {success_count} 部",
+                task_type="batch_enrich",
+            )
+    except Exception:
+        logger.exception("missing enrich background job 失敗")
+        _update_missing_enrich_job(
+            job,
+            state="error",
+            message="補全中斷，請查閱日誌",
+            finished_at=time.time(),
+        )
+        _append_missing_enrich_log(job, "error", "補全中斷，請查閱日誌")
+        _emit_notif(
+            "error",
+            "notif.batch_enrich_failed",
+            message="批次補完中斷，請查閱日誌",
+            task_type="batch_enrich",
+        )
 
 
 def _collect_long_paths(
@@ -79,6 +270,68 @@ def _emit_long_path_warnings(logger_, long_paths: List[str]) -> None:
     logger_.warning(f"[a5] 發現 {len(long_paths)} 個路徑超過 260 字元：")
     for p in long_paths:
         logger_.warning(f"  {p}")
+
+
+def _centralized_sidecar_enabled(config: dict) -> bool:
+    sidecar = config.get("sidecar") if isinstance(config, dict) else {}
+    if not isinstance(sidecar, dict):
+        return False
+    return sidecar.get("mode") == "centralized" and bool(str(sidecar.get("root_dir", "")).strip())
+
+
+def _image_allowlist_dirs(config: dict) -> list:
+    gallery_config = config.get("gallery", {}) if isinstance(config, dict) else {}
+    roots = list(gallery_config.get("directories", []) or [])
+
+    sidecar = config.get("sidecar", {}) if isinstance(config, dict) else {}
+    if isinstance(sidecar, dict) and sidecar.get("mode") == "centralized":
+        root_dir = str(sidecar.get("root_dir", "")).strip()
+        if root_dir:
+            roots.append(root_dir)
+
+    return roots
+
+
+def _video_sidecar_metadata(video: Video | None) -> dict:
+    if video is None:
+        return {}
+    return {
+        "number": video.number or "",
+        "num": video.number or "",
+        "canonical_number": video.number or "",
+        "maker": video.maker or "",
+        "title": video.title or video.original_title or "",
+        "actors": video.actresses or [],
+        "date": video.release_date or "",
+        "release_date": video.release_date or "",
+    }
+
+
+def _centralized_sidecar_needs_rescan(
+    fs_path: str,
+    video: Video | None,
+    config: dict,
+    path_mappings: dict,
+) -> bool:
+    if video is None or not _centralized_sidecar_enabled(config):
+        return False
+
+    paths = resolve_sidecar_paths(fs_path, _video_sidecar_metadata(video), config)
+    nfo_path = Path(paths.nfo_path)
+    cover_candidates = [Path(paths.cover_path), Path(paths.poster_path), Path(paths.fanart_path)]
+    sidecar_has_assets = nfo_path.is_file() or any(p.is_file() for p in cover_candidates) or Path(paths.extrafanart_dir).is_dir()
+    if not sidecar_has_assets:
+        return False
+
+    if nfo_path.is_file() and video.nfo_mtime != nfo_path.stat().st_mtime:
+        return True
+
+    expected_cover_uris = {
+        to_file_uri(str(candidate), path_mappings)
+        for candidate in cover_candidates
+        if candidate.is_file()
+    }
+    return bool(expected_cover_uris) and video.cover_path not in expected_cover_uris
 
 
 def generate_avlist() -> Generator[str, None, None]:
@@ -136,7 +389,8 @@ def generate_avlist() -> Generator[str, None, None]:
         yield _sse_event({"type": "log", "level": "info", "message": f"資料庫筆數: {repo.count()}"})
 
         # 初始化掃描器
-        scanner = VideoScanner(path_mappings=path_mappings)
+        scanner = VideoScanner(path_mappings=path_mappings, sidecar_config=config)
+        centralized_sidecar = _centralized_sidecar_enabled(config)
 
         total_dirs = len(directories)
         total_inserted = 0
@@ -194,8 +448,8 @@ def generate_avlist() -> Generator[str, None, None]:
 
                 yield _sse_event({"type": "log", "level": "info", "message": f"{directory}: 找到 {len(all_files)} 個檔案"})
 
-                # 取得現有 mtime 索引
-                db_index = repo.get_mtime_index()
+                # 取得現有 scan 索引（mtime / nfo_mtime / size）
+                db_index = repo.get_scan_index()
 
                 # 比對決定需要處理的檔案
                 needs_scan = []
@@ -207,11 +461,21 @@ def generate_avlist() -> Generator[str, None, None]:
                     current_paths.add(file_uri)
 
                     db_entry = db_index.get(file_uri)
+                    db_video = repo.get_by_path(file_uri) if centralized_sidecar else None
+                    if db_video is not None:
+                        file_info['_sidecar_metadata'] = _video_sidecar_metadata(db_video)
+
                     if db_entry is None:
                         # 新檔案
                         needs_scan.append(file_info)
-                    elif db_entry[0] != file_info['mtime'] or db_entry[1] != file_info.get('nfo_mtime', 0):
-                        # mtime 或 nfo_mtime 變更
+                    elif (
+                        db_entry[0] != file_info['mtime']
+                        or db_entry[1] != file_info.get('nfo_mtime', 0)
+                        or (db_entry[2] or 0) != (file_info.get('size') or 0)
+                    ):
+                        # mtime、nfo_mtime 或 size 變更
+                        needs_scan.append(file_info)
+                    elif _centralized_sidecar_needs_rescan(path, db_video, config, path_mappings):
                         needs_scan.append(file_info)
 
                 # 清理已刪除的檔案（限定在此目錄下）
@@ -244,7 +508,11 @@ def generate_avlist() -> Generator[str, None, None]:
                     yield _sse_event({"type": "log", "level": "info", "message": f"  [{i}/{len(needs_scan)}] {video_name}"})
 
                     try:
-                        video_info = scanner.scan_file(file_info['path'], None)
+                        video_info = scanner.scan_file(
+                            file_info['path'],
+                            None,
+                            file_info.get('_sidecar_metadata'),
+                        )
                         video = Video.from_video_info(video_info)
                         video.mtime = file_info['mtime']
                         video.nfo_mtime = file_info.get('nfo_mtime', 0)
@@ -258,7 +526,7 @@ def generate_avlist() -> Generator[str, None, None]:
 
                 # 批次寫入
                 if videos_to_upsert:
-                    inserted, updated = repo.upsert_batch(videos_to_upsert)
+                    inserted, updated = repo.upsert_batch(videos_to_upsert, preserve_scan_fields=False)
                     total_inserted += inserted
                     total_updated += updated
 
@@ -595,6 +863,45 @@ async def check_missing():
         return {"success": False, "error": "檢查缺失 NFO/封面失敗"}
 
 
+@router.post("/missing-enrich/start")
+async def start_missing_enrich(request: MissingEnrichStartRequest):
+    """Start or reattach to the in-memory missing NFO/cover enrich job."""
+    global _missing_enrich_job, _missing_enrich_thread
+
+    items = _dedupe_missing_enrich_items(request.items)
+    with _missing_enrich_lock:
+        if _missing_enrich_job and _missing_enrich_job.get("state") in _MISSING_ENRICH_RUNNING_STATES:
+            return {"success": True, "data": _missing_enrich_status_snapshot()}
+
+        _missing_enrich_job = {
+            "job_id": str(uuid.uuid4()),
+            "state": "running",
+            "current": 0,
+            "total": len(items),
+            "success_count": 0,
+            "failed_count": 0,
+            "message": "補全準備中",
+            "logs": [],
+            "started_at": time.time(),
+            "finished_at": None,
+        }
+        job = _missing_enrich_job
+        _missing_enrich_thread = threading.Thread(
+            target=_run_missing_enrich_job,
+            args=(job, items),
+            daemon=True,
+        )
+        _missing_enrich_thread.start()
+
+    return {"success": True, "data": _missing_enrich_status_snapshot()}
+
+
+@router.get("/missing-enrich/status")
+async def get_missing_enrich_status():
+    """Return the latest in-memory missing enrich job status."""
+    return {"success": True, "data": _missing_enrich_status_snapshot()}
+
+
 def generate_nfo_update() -> Generator[str, None, None]:
     """NFO 更新生成器（SSE 串流）- 使用 SQLite"""
 
@@ -759,10 +1066,10 @@ async def get_image(path: str = Query(..., description="圖片路徑")):
         logger.warning("get_image: 拒絕非圖片副檔名請求 ext=%s", ext)
         return Response(status_code=403, content="不允許的檔案類型")
 
-    # 3. 目錄白名單：只允許 gallery.directories 底下的檔案
+    # 3. 目錄白名單：允許 gallery.directories 與集中 sidecar 根目錄底下的圖片
     config = load_config()
     gallery_config = config.get('gallery', {})
-    directories = gallery_config.get('directories', [])
+    directories = _image_allowlist_dirs(config)
     path_mappings = gallery_config.get('path_mappings', {})
 
     file_uri = to_file_uri(local_path, path_mappings)

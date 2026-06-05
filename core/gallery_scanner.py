@@ -17,9 +17,11 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from core.logger import get_logger
+from core.filename_identity import parse_media_identity
 from core.maker_mapping import load_name_mapping, load_prefix_mapping
 from core.nfo_utils import sanitize_nfo_bytes
 from core.path_utils import normalize_path, to_file_uri, uri_to_fs_path
+from core.sidecar_paths import SidecarPaths, resolve_sidecar_paths
 from core.video_extensions import DEFAULT_VIDEO_EXTENSIONS, ZERO_SIZE_EXTENSIONS
 
 logger = get_logger(__name__)
@@ -227,10 +229,16 @@ class VideoScanner:
         r"\[<發售日>\]\(<編號>\)<演員> - <片名>",
     ]
 
-    def __init__(self, naming_formats: List[str] = None, path_mappings: dict = None):
+    def __init__(
+        self,
+        naming_formats: List[str] = None,
+        path_mappings: dict = None,
+        sidecar_config: dict = None,
+    ):
         self.naming_formats = naming_formats or self.DEFAULT_NAMING_FORMATS
         self._compiled_formats = self._compile_naming_formats()
         self.path_mappings = path_mappings or {}
+        self.sidecar_config = sidecar_config or {}
         self.prefix_mapping = load_prefix_mapping()
         self.name_mapping = load_name_mapping()
         # key: dir path str → (sorted videos list, sorted images list)
@@ -278,15 +286,8 @@ class VideoScanner:
 
     def find_num_from_filename(self, filename: str) -> str:
         """從檔名提取番號"""
-        # 移除副檔名
-        name = Path(filename).stem
-
-        for pattern, extractor in self.NUM_PATTERNS:
-            match = re.match(pattern, name, re.IGNORECASE)
-            if match:
-                return extractor(match)
-
-        return ""
+        identity = parse_media_identity(filename)
+        return identity.canonical_number or ""
 
     def parse_filename(self, filename: str) -> VideoInfo:
         """依據命名格式解析檔名"""
@@ -310,11 +311,89 @@ class VideoScanner:
         if not info.num:
             info.num = self.find_num_from_filename(filename)
 
+        if info.num and not info.maker:
+            bracket_values = re.findall(r'\[([^\]]+)\]', name)
+            for idx, value in enumerate(bracket_values):
+                if parse_media_identity(value).canonical_number != info.num:
+                    continue
+
+                candidates = []
+                if idx + 1 < len(bracket_values):
+                    candidates.append(bracket_values[idx + 1])
+                if idx > 0:
+                    candidates.append(bracket_values[idx - 1])
+
+                for candidate in candidates:
+                    if not parse_media_identity(candidate).canonical_number:
+                        info.maker = candidate.strip()
+                        break
+                if info.maker:
+                    break
+
         # 如果還是沒有標題，用檔名
         if not info.title:
             info.title = name
 
         return info
+
+    def _sidecar_metadata(
+        self,
+        video_path: Path,
+        filename_info: VideoInfo,
+        metadata: Optional[dict] = None,
+    ) -> dict:
+        """Build enough metadata to resolve centralized sidecar paths."""
+        metadata = metadata or {}
+        number = (
+            metadata.get("canonical_number")
+            or metadata.get("number")
+            or metadata.get("num")
+            or filename_info.num
+            or video_path.stem
+        )
+        maker = metadata.get("maker") or filename_info.maker or ""
+        maker = self.normalize_maker(str(number or ""), str(maker or ""))
+        actors = metadata.get("actors") or metadata.get("actresses") or []
+        if isinstance(actors, str):
+            actors = [actors]
+        actor = metadata.get("actor") or filename_info.actor or (actors[0] if actors else "")
+
+        return {
+            **metadata,
+            "number": str(number or ""),
+            "num": str(number or ""),
+            "canonical_number": str(number or ""),
+            "maker": maker,
+            "title": metadata.get("title") or filename_info.title or "",
+            "actor": actor,
+            "actors": actors,
+            "date": metadata.get("date") or metadata.get("release_date") or filename_info.date or "",
+        }
+
+    def _resolve_sidecar_paths(
+        self,
+        video_path: Path,
+        filename_info: VideoInfo,
+        metadata: Optional[dict] = None,
+    ) -> SidecarPaths:
+        sidecar_meta = self._sidecar_metadata(video_path, filename_info, metadata)
+        return resolve_sidecar_paths(str(video_path), sidecar_meta, self.sidecar_config)
+
+    @staticmethod
+    def _unique_existing_paths(*paths: str | Path) -> List[Path]:
+        seen = set()
+        result = []
+        for raw_path in paths:
+            if not raw_path:
+                continue
+            path = Path(raw_path)
+            key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            if path.exists():
+                result.append(path)
+        return result
 
     def parse_nfo(self, nfo_path: str) -> Optional[VideoInfo]:
         """讀取 NFO 檔案"""
@@ -491,7 +570,12 @@ class VideoScanner:
 
         return fs if Path(fs).is_file() else None
 
-    def find_cover_image(self, video_path: str, nfo_thumb: Optional[str] = None) -> str:
+    def find_cover_image(
+        self,
+        video_path: str,
+        nfo_thumb: Optional[str] = None,
+        nfo_dir: Optional[str | Path] = None,
+    ) -> str:
         """尋找封面圖片（4 層 fallback）
 
         L1: 同名圖片（{stem}{ext}）
@@ -502,6 +586,7 @@ class VideoScanner:
         video_path = Path(video_path)
         video_dir = video_path.parent
         video_stem = video_path.stem
+        thumb_base_dir = Path(nfo_dir) if nfo_dir else video_dir
 
         # L1: 同名圖片
         for ext in IMAGE_EXTENSIONS:
@@ -518,7 +603,7 @@ class VideoScanner:
 
         # L3: NFO <thumb>
         if nfo_thumb:
-            resolved = self._resolve_thumb_path(nfo_thumb, video_dir)
+            resolved = self._resolve_thumb_path(nfo_thumb, thumb_base_dir)
             if resolved:
                 return resolved
 
@@ -529,7 +614,12 @@ class VideoScanner:
 
         return ""
 
-    def scan_file(self, video_path: str, base_path: str = None) -> VideoInfo:
+    def scan_file(
+        self,
+        video_path: str,
+        base_path: str = None,
+        metadata: Optional[dict] = None,
+    ) -> VideoInfo:
         """掃描單一影片檔案"""
         t_start = time.time()
         video_path = Path(video_path)
@@ -559,10 +649,19 @@ class VideoScanner:
         except OSError:
             pass
 
+        filename_info = self.parse_filename(video_path.name)
+        filename_info.maker = self.normalize_maker(filename_info.num, filename_info.maker)
+        sidecar_paths = self._resolve_sidecar_paths(video_path, filename_info, metadata)
+
         # 嘗試讀取 NFO
-        nfo_path = video_path.with_suffix('.nfo')
+        nfo_path = None
         t_nfo_check = time.time()
-        if nfo_path.exists():
+        nfo_candidates = self._unique_existing_paths(
+            sidecar_paths.nfo_path,
+            video_path.with_suffix('.nfo'),
+        )
+        if nfo_candidates:
+            nfo_path = nfo_candidates[0]
             logger.debug(f"[Scan]   nfo_exists: {t_nfo_check - t_start:.2f}s")
             nfo_info = self.parse_nfo(str(nfo_path))
             t_parse = time.time()
@@ -584,7 +683,6 @@ class VideoScanner:
 
         # 如果 NFO 沒有資料，從檔名解析
         if not info.title or not info.num:
-            filename_info = self.parse_filename(video_path.name)
             info.title = info.title or filename_info.title
             info.actor = info.actor or filename_info.actor
             info.num = info.num or filename_info.num
@@ -594,9 +692,32 @@ class VideoScanner:
 
         # 根據番號前綴正規化片商名稱
         info.maker = self.normalize_maker(info.num, info.maker)
+        final_metadata = self._sidecar_metadata(
+            video_path,
+            VideoInfo(
+                title=info.title,
+                actor=info.actor,
+                num=info.num,
+                maker=info.maker,
+                date=info.date,
+            ),
+            metadata,
+        )
+        sidecar_paths = resolve_sidecar_paths(str(video_path), final_metadata, self.sidecar_config)
 
         # 尋找封面圖片
-        img_path = self.find_cover_image(str(video_path), nfo_thumb=info.nfo_thumb)
+        sidecar_image_candidates = self._unique_existing_paths(
+            sidecar_paths.cover_path,
+            sidecar_paths.poster_path,
+            sidecar_paths.fanart_path,
+        )
+        img_path = str(sidecar_image_candidates[0]) if sidecar_image_candidates else ""
+        if not img_path:
+            img_path = self.find_cover_image(
+                str(video_path),
+                nfo_thumb=info.nfo_thumb,
+                nfo_dir=nfo_path.parent if nfo_path else None,
+            )
         if img_path:
             if base_path:
                 try:
@@ -608,8 +729,12 @@ class VideoScanner:
                 info.img = to_file_uri(img_path, self.path_mappings)
 
         # 掃描 extrafanart/ 目錄（sample images）
-        extrafanart_dir = video_path.parent / 'extrafanart'
-        if extrafanart_dir.is_dir():
+        extrafanart_dirs = self._unique_existing_paths(
+            sidecar_paths.extrafanart_dir,
+            video_path.parent / 'extrafanart',
+        )
+        extrafanart_dir = extrafanart_dirs[0] if extrafanart_dirs else None
+        if extrafanart_dir and extrafanart_dir.is_dir():
             try:
                 for img_path in sorted(extrafanart_dir.glob('fanart*.jpg')):
                     if base_path:
@@ -717,7 +842,7 @@ class VideoScanner:
                 logger.warning(f"  [!] 錯誤: {e}")
 
         # 批次寫入
-        inserted, updated = repo.upsert_batch(videos_to_upsert)
+        inserted, updated = repo.upsert_batch(videos_to_upsert, preserve_scan_fields=False)
         logger.info(f"[*] 完成: 新增 {inserted}, 更新 {updated}, 刪除 {deleted_count}")
 
         # §b1 AC#2: sample_images 孤兒清理 pass（CLI / 直接呼叫路徑覆蓋）

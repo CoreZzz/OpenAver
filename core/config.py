@@ -49,6 +49,22 @@ class SearchConfig(BaseModel):
     uncensored_mode_enabled: bool = False  # deprecated: read via core.source_settings.is_uncensored_mode_effective()
     favorite_folder: str = ""  # 我的最愛資料夾 - 空字串 = 使用系統下載資料夾
     proxy_url: str = ""
+    source_mode: Literal["enabled", "censored", "uncensored", "all", "custom"] = "enabled"
+    custom_source_ids: List[str] = []
+    try_all_aliases: bool = True
+    max_sources_per_search: int = 10
+    max_queries_per_source: int = 3
+
+
+class SidecarConfig(BaseModel):
+    mode: Literal["alongside", "centralized"] = "alongside"
+    root_dir: str = ""
+    layout: str = "{maker}/{num}"
+    nfo_filename: str = "{num}.nfo"
+    cover_filename: str = "cover.jpg"
+    poster_filename: str = "poster.jpg"
+    fanart_filename: str = "fanart.jpg"
+    extrafanart_dir: str = "extrafanart"
 
 
 class SourceLinksConfig(BaseModel):
@@ -108,6 +124,7 @@ class TranslateConfig(BaseModel):
 
 class GalleryConfig(BaseModel):
     directories: List[str] = []
+    directory_labels: dict = Field(default_factory=dict)
     output_dir: str = "output"
     output_filename: str = "gallery_output.html"
     path_mappings: dict = {}
@@ -134,6 +151,7 @@ class GeneralConfig(BaseModel):
 class AppConfig(BaseModel):
     scraper: ScraperConfig = ScraperConfig()
     search: SearchConfig = SearchConfig()
+    sidecar: SidecarConfig = SidecarConfig()
     source_links: SourceLinksConfig = SourceLinksConfig()
     translate: TranslateConfig = TranslateConfig()
     gallery: GalleryConfig = GalleryConfig()
@@ -171,13 +189,19 @@ def load_config() -> dict:
             need_save = True
 
         # Migration: min_size_kb -> min_size_mb (KB 轉 MB)
-        if 'gallery' in raw_config:
+        if 'gallery' in raw_config and isinstance(raw_config.get('gallery'), dict):
             g = raw_config['gallery']
             if 'min_size_kb' in g and 'min_size_mb' not in g:
                 # KB -> MB (四捨五入可接受)
                 g['min_size_mb'] = int(round(g.get('min_size_kb', 0) / 1024))
                 del g['min_size_kb']
                 need_save = True
+            if 'directory_labels' not in g or not isinstance(g.get('directory_labels'), dict):
+                g['directory_labels'] = {}
+                need_save = True
+        else:
+            raw_config['gallery'] = GalleryConfig().model_dump()
+            need_save = True
 
         # Migration: translate 扁平結構 -> 嵌套結構
         if 'translate' in raw_config:
@@ -293,6 +317,31 @@ def load_config() -> dict:
         if 'primary_source' in search_section:
             del search_section['primary_source']
             need_save = True
+
+        # Migration: Phase 1.5 search source mode / query strategy defaults
+        search_defaults = SearchConfig().model_dump()
+        for key in [
+            'source_mode',
+            'custom_source_ids',
+            'try_all_aliases',
+            'max_sources_per_search',
+            'max_queries_per_source',
+        ]:
+            if key not in search_section:
+                search_section[key] = search_defaults[key]
+                need_save = True
+
+        # Migration: Phase 3 sidecar path defaults
+        sidecar_defaults = SidecarConfig().model_dump()
+        if 'sidecar' not in raw_config or not isinstance(raw_config.get('sidecar'), dict):
+            raw_config['sidecar'] = sidecar_defaults
+            need_save = True
+        else:
+            sidecar_section = raw_config['sidecar']
+            for key, default_val in sidecar_defaults.items():
+                if key not in sidecar_section:
+                    sidecar_section[key] = default_val
+                    need_save = True
 
         # Migration: sources 段（TASK-61a-2）— US1-critical，fail-open
         # 缺段 → 8 builtin 全 enabled（不讀 source_links，CD-61-6）；

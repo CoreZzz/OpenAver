@@ -525,13 +525,25 @@ async def set_actress_photo(name: str, req: SetActressPhotoRequest):
             return JSONResponse(status_code=400, content={"error": "video_path_required"})
         # file:/// URI → FS path（禁止手動 strip）
         video_fs_path = uri_to_fs_path(req.video_path)
+        requested_video_keys = {
+            str(req.video_path),
+            video_fs_path,
+        }
+        try:
+            requested_video_keys.add(coerce_to_file_uri(video_fs_path))
+        except Exception as e:
+            logger.warning("[actress] local_crop coerce request path 失敗 path=%s: %s", video_fs_path, e)
         # 從 DB 取該影片的 cover_path
         video_repo = VideoRepository()
         videos = video_repo.get_videos_by_actress(name)
         # Fix 3 (T3): v.path 在 DB 存 file:/// URI（gallery_scanner 用 to_file_uri 寫入），
         # 比對前雙邊都正規化為 FS path，避免 URI vs FS path 永遠 fail
         match = next(
-            (v for v in videos if uri_to_fs_path(str(v.path)) == video_fs_path),
+            (
+                v for v in videos
+                if str(v.path) in requested_video_keys
+                or uri_to_fs_path(str(v.path)) in requested_video_keys
+            ),
             None,
         )
         if match is None or not match.cover_path:

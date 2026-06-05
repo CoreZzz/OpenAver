@@ -58,7 +58,7 @@ _TOOLS: list[dict] = [
     },
     {
         "name": "batch_search",
-        "description": "一次搜尋多個番號，適合文章解析後批量查詢。不修改資料庫",
+        "description": "一次搜尋多個番號，適合文章解析後批量查詢；會先按 canonical work key 去重，避免同作品變體重複打外站。不修改資料庫",
         "side_effect": False,
         "method": "POST",
         "path": "/api/batch-search",
@@ -71,8 +71,8 @@ _TOOLS: list[dict] = [
             "required": ["numbers"],
         },
         "output_schema": {
-            "results": "{number: Video} — 以番號為 key 的搜尋結果 map",
-            "summary": "{total, found, not_found} — 統計摘要",
+            "results": "{canonical_number: Video} — 以 canonical 番號為 key 的搜尋結果 map；每筆含 requested_numbers 對應原始輸入",
+            "summary": "{total, found, not_found} — 統計摘要；total 為 canonical 去重後數量",
         },
         "retry_safe": True,
         "rate_limit_hint": "硬限 50 筆（伺服器端截斷），建議一次不超過 20 筆",
@@ -99,6 +99,7 @@ _TOOLS: list[dict] = [
             "new_filename": "string — 新檔名",
             "cover_path": "string — 封面圖路徑",
             "nfo_path": "string — NFO 檔路徑",
+            "sidecar_note": "NFO/cover/poster/fanart/extrafanart 實際寫入位置遵守 config.sidecar；centralized 模式不一定在影片同目錄",
         },
         "side_effect": True,
         "confirmation_required": True,
@@ -138,7 +139,7 @@ _TOOLS: list[dict] = [
     },
     {
         "name": "local_status",
-        "description": "批量查詢番號是否已在本地收藏。不修改資料庫",
+        "description": "批量查詢番號是否已在本地收藏；接受原始/變體番號並按 canonical work key 聚合同作品多檔案。不修改資料庫",
         "side_effect": False,
         "method": "GET",
         "path": "/api/search/local-status",
@@ -150,7 +151,7 @@ _TOOLS: list[dict] = [
             "required": ["numbers"],
         },
         "output_schema": {
-            "<number>": "{exists: boolean, count: integer, paths: [string]} — 以番號為 key",
+            "<input_number>": "{exists: boolean, canonical_number: string, work_key: string, count?: integer, paths?: [string]} — 以原始輸入為 key，狀態按 canonical work key 聚合",
         },
         "retry_safe": True,
         "_example_template": "curl '{base}/api/search/local-status?numbers=SONE-205,ABW-001'",
@@ -169,7 +170,12 @@ _TOOLS: list[dict] = [
             "required": ["filenames"],
         },
         "output_schema": {
-            "results": "[{filename: string, number: string|null, has_subtitle: boolean}] — 解析結果陣列",
+            "results": (
+                "[{filename: string, number: string|null, canonical_number: string|null, "
+                "search_number: string|null, number_aliases: [string], source_queries: object, "
+                "part_index: string|null, variant_flags: {subtitle_cn: boolean, cracked: boolean}, "
+                "variant_label: string, has_subtitle: boolean}] — 解析結果陣列；number 保留為 canonical_number 的向後相容 alias"
+            ),
         },
         "retry_safe": True,
         "_example_template": "curl -X POST -H 'Content-Type: application/json' -d '{{\"filenames\":[\"SONE-205-C.mp4\",\"FC2-1234567.mp4\"]}}' {base}/api/parse-filename",
@@ -218,6 +224,7 @@ _TOOLS: list[dict] = [
             "cover_written": "boolean — 是否寫入封面",
             "fields_filled": "[string] — 本次補齊的欄位名",
             "source_used": "string — 使用的來源（javbus/dmm/db 等）",
+            "sidecar_note": "NFO/封面/劇照寫入位置遵守 config.sidecar；overwrite 檢查也使用同一套 sidecar 路徑解析",
         },
         "side_effect": True,
         "confirmation_required": False,
@@ -305,6 +312,7 @@ _TOOLS: list[dict] = [
             "source_used": "string — 使用的來源",
             "error": "string|null — 錯誤訊息；multi_video_folder=資料夾有多片，拒絕執行",
             "count": "integer — multi_video_folder 時，資料夾內的影片數",
+            "sidecar_note": "extrafanart 寫入位置遵守 config.sidecar",
         },
         "side_effect": True,
         "confirmation_required": True,
@@ -377,6 +385,7 @@ _TOOLS: list[dict] = [
             "progress": "{type: 'progress', current, total, number}",
             "result_item": "{type: 'result-item', number, file_path, success, nfo_written, cover_written, source_used, error?}",
             "done": "{type: 'done', summary: {total, success, failed}}",
+            "sidecar_note": "每個 item 的 NFO/封面/劇照寫入位置遵守 config.sidecar",
         },
         "side_effect": True,
         "confirmation_required": True,
@@ -654,14 +663,16 @@ _TOOLS: list[dict] = [
         "output_schema": {
             "success": "boolean",
             "total": "integer — videos 陣列長度",
+            "total_files": "integer — 折疊前的原始影片檔數",
             "videos": {
                 "type": "array",
-                "description": "影片清單；每筆 item 為 19 欄位 dict",
+                "description": "作品級影片清單；同一 work_key 的多個檔案會折疊成一筆，詳細檔案在 files",
                 "item_fields": {
                     "path": "string — file:/// URI（DB key 格式，可作為 showcase_video 查詢輸入）",
                     "title": "string",
                     "original_title": "string",
                     "number": "string — 番號（可能為空字串）",
+                    "directory_label": "string enum[censored, uncensored] — 由掃描資料夾標記繼承；代表本地路徑分類，不代表 -u 破解版，也不限制搜尋信源",
                     "actresses": "string — ⚠️ 逗號分隔字串，**不是** array（例：'女優A,女優B'）",
                     "maker": "string",
                     "release_date": "string — YYYY-MM-DD（可能為空字串）",
@@ -677,6 +688,11 @@ _TOOLS: list[dict] = [
                     "user_tags": "array[string] — 用戶自訂標籤（真正的 array，可空）",
                     "has_cover": "boolean — DB 初判 cover_path 非空（不做 IO 檢查）",
                     "has_nfo": "boolean — nfo_mtime > 0（41a 寫入契約）",
+                    "work_key": "string — 同作品聚合 key，例如 SONE-103；-1/-A/CD1 會折疊到同一 key",
+                    "part_index": "string|null — 分片標記，例如 1/A/CD1；主檔為 null",
+                    "variant_flags": "object — {subtitle_cn:boolean, cracked:boolean}，-C/-U/-UC 解析結果",
+                    "variant_label": "string — 變體摘要",
+                    "files": "array[object] — 同作品檔案清單；每筆含 path、filename、number、directory_label、work_key、part_index、variant_flags、variant_label、size、mtime",
                 },
             },
         },
@@ -1242,7 +1258,8 @@ _TOOLS: list[dict] = [
         },
         "output_schema": {
             "sources": "array — 每筆 {id: string, display_name: string, type: string, enabled: boolean, order: integer, is_censored: boolean}，依 order 升冪",
-            "total_enabled": "integer — 已揭露（實際會 fan-out）的啟用來源數",
+            "total_enabled": "integer — 已揭露（實際會 fan-out）的來源數；source_mode=all/custom 時可能包含 enabled=false 的來源",
+            "source_mode": "string — 目前搜尋來源策略：enabled/censored/uncensored/all/custom",
         },
         "retry_safe": True,
         "_example_template": "curl '{base}/api/scraper-sources'",

@@ -473,7 +473,114 @@
     transition: opacity var(--fluent-duration-fast) var(--fluent-ease-standard);
 }
 
+.showcase-grid .av-card-preview:not(.hero-card) .footer-default {
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.showcase-grid .av-card-preview:not(.hero-card) .footer-default .av-num {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+}
+
+.showcase-grid .av-card-preview:not(.hero-card) .footer-default .av-card-badges {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.08rem;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.showcase-grid .av-card-preview:not(.hero-card) .footer-default .av-dir-label {
+    min-width: auto;
+    padding: 0.03rem 0.08rem;
+    font-size: 0.56rem;
+}
+
+.showcase-grid .av-card-preview:not(.hero-card) .footer-default .av-variant-label {
+    min-width: auto;
+}
+
 /* 懸停層：標題（絕對定位覆蓋） */
+.av-dir-label,
+.lb-dir-label {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.2rem;
+    padding: 0.12rem 0.42rem;
+    border: 1px solid var(--stroke-subtle);
+    border-radius: var(--radius-pill);
+    background: color-mix(in oklch, var(--surface-2) 70%, transparent);
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.av-file-count-badge {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: calc(100% - 1rem);
+    padding: 0.2rem 0.45rem;
+    color: var(--text-inverse);
+    background: var(--overlay-control);
+    border: 1px solid color-mix(in oklch, var(--text-inverse) 18%, transparent);
+    border-radius: var(--fluent-radius-md);
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    backdrop-filter: blur(var(--fluent-blur-light));
+    -webkit-backdrop-filter: blur(var(--fluent-blur-light));
+}
+
+.table-dir-label {
+    margin-left: 0.35rem;
+    vertical-align: middle;
+}
+
+.table-file-count,
+.list-file-count {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.35rem;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.list-dir-label {
+    min-width: auto;
+}
+
+.lb-dir-label {
+    margin-left: 0.35rem;
+}
+
+.lb-meta-chip {
+    cursor: pointer;
+}
+
+.lb-meta-chip.lb-link:hover {
+    border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+    color: var(--accent);
+    text-decoration: none;
+}
+
 .footer-hover {
     position: absolute;
     inset: 0;
@@ -636,7 +743,7 @@
 /* Metadata Panel — 緊湊版（匹配原版 gallery） */
 .lightbox-metadata {
     padding: 0.5rem 0 0 0;
-    max-width: 600px;
+    max-width: min(900px, 100%);
     width: 100%;
     border-top: 1px solid var(--stroke-subtle);
 }
@@ -704,6 +811,122 @@
 }
 
 /* 分隔符由 HTML 中各 span 內部開頭的 " · " 控制，隨 x-show 一起顯示/隱藏 */
+
+/* Work files */
+.lightbox-metadata .lb-files {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 0.4rem;
+}
+
+.lightbox-metadata .lb-files-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.lightbox-metadata .lb-files-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.28rem;
+    justify-content: start;
+}
+
+.lightbox-metadata .lb-file-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 1.65rem 1.65rem;
+    grid-template-areas: "main play folder";
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.lightbox-metadata .lb-file-main,
+.lightbox-metadata .lb-file-play,
+.lightbox-metadata .lb-file-folder {
+    min-height: 1.75rem;
+    color: var(--text-secondary);
+    background: color-mix(in oklch, var(--surface-1) 65%, transparent);
+    border: 1px solid var(--stroke-subtle);
+    border-radius: var(--fluent-radius-md);
+}
+
+.lightbox-metadata .lb-file-main {
+    grid-area: main;
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 0.28rem;
+    min-width: 0;
+    min-height: 1.75rem;
+    padding: 0.22rem 0.32rem;
+    text-align: left;
+}
+
+.lightbox-metadata .lb-file-play {
+    grid-area: play;
+}
+
+.lightbox-metadata .lb-file-folder {
+    grid-area: folder;
+}
+
+.lightbox-metadata .lb-file-play,
+.lightbox-metadata .lb-file-folder {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 1.75rem;
+}
+
+.lightbox-metadata .lb-file-part {
+    flex: 0 0 auto;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--accent);
+    order: 1;
+}
+
+.lightbox-metadata .lb-file-text {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    order: 2;
+}
+
+.lightbox-metadata .lb-file-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.72rem;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lightbox-metadata .lb-file-meta {
+    display: flex;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    gap: 0.35rem;
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+    .lightbox-metadata .lb-files-list {
+        grid-template-columns: 1fr;
+    }
+}
 
 /* Tags — pill flex wrap */
 .lightbox-metadata .lb-tags {

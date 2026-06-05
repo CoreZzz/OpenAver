@@ -1,8 +1,133 @@
 import pytest
 import os
+import threading
+import time
 from pathlib import Path
 from urllib.parse import quote
 from core.path_utils import to_file_uri
+from core.enricher import EnrichResult
+
+
+def _ok_enrich_result():
+    return EnrichResult(
+        success=True,
+        nfo_written=True,
+        cover_written=True,
+        extrafanart_written=0,
+        fields_filled=[],
+        source_used="javbus",
+        error=None,
+    )
+
+
+def _failed_enrich_result():
+    return EnrichResult(
+        success=False,
+        nfo_written=False,
+        cover_written=False,
+        extrafanart_written=0,
+        fields_filled=[],
+        source_used="",
+        error="補全失敗",
+    )
+
+
+def _wait_missing_enrich(client, state="done", timeout=2.0):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        last = client.get("/api/gallery/missing-enrich/status").json()["data"]
+        if last.get("state") == state:
+            return last
+        time.sleep(0.02)
+    raise AssertionError(f"missing enrich did not reach {state}: {last}")
+
+
+@pytest.fixture
+def reset_missing_enrich_job():
+    import web.routers.scanner as scanner_mod
+    with scanner_mod._missing_enrich_lock:
+        scanner_mod._missing_enrich_job = None
+        scanner_mod._missing_enrich_thread = None
+        scanner_mod._missing_enrich_log_seq = 0
+    yield
+    with scanner_mod._missing_enrich_lock:
+        scanner_mod._missing_enrich_job = None
+        scanner_mod._missing_enrich_thread = None
+
+
+class TestMissingEnrichBackgroundAPI:
+    def test_status_idle_when_no_job(self, client, reset_missing_enrich_job):
+        response = client.get("/api/gallery/missing-enrich/status")
+        assert response.status_code == 200
+        assert response.json()["data"] == {"state": "idle"}
+
+    def test_start_job_progresses_to_done(self, client, mocker, reset_missing_enrich_job):
+        mocker.patch("web.routers.scanner.load_config", return_value={"search": {"proxy_url": ""}})
+        mocker.patch("web.routers.scanner.enrich_single", return_value=_ok_enrich_result())
+
+        response = client.post("/api/gallery/missing-enrich/start", json={
+            "items": [{"file_path": "/video/SONE-205.mp4", "number": "SONE-205-C"}],
+        })
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["data"]["job_id"]
+
+        status = _wait_missing_enrich(client)
+        assert status["state"] == "done"
+        assert status["current"] == 1
+        assert status["total"] == 1
+        assert status["success_count"] == 1
+        assert status["failed_count"] == 0
+        assert status["logs"]
+
+    def test_start_while_running_reuses_current_job(self, client, mocker, reset_missing_enrich_job):
+        release = threading.Event()
+
+        def slow_enrich(**kwargs):
+            release.wait(1)
+            return _ok_enrich_result()
+
+        mocker.patch("web.routers.scanner.load_config", return_value={"search": {"proxy_url": ""}})
+        mocker.patch("web.routers.scanner.enrich_single", side_effect=slow_enrich)
+
+        first = client.post("/api/gallery/missing-enrich/start", json={
+            "items": [{"file_path": "/video/SONE-205.mp4", "number": "SONE-205"}],
+        }).json()["data"]
+        second = client.post("/api/gallery/missing-enrich/start", json={
+            "items": [{"file_path": "/video/ABW-001.mp4", "number": "ABW-001"}],
+        }).json()["data"]
+
+        try:
+            assert second["job_id"] == first["job_id"]
+            assert second["total"] == 1
+        finally:
+            release.set()
+
+        _wait_missing_enrich(client)
+
+    def test_failed_item_increments_failed_and_continues(self, client, mocker, reset_missing_enrich_job):
+        mocker.patch("web.routers.scanner.load_config", return_value={"search": {"proxy_url": ""}})
+        mocker.patch(
+            "web.routers.scanner.enrich_single",
+            side_effect=[_failed_enrich_result(), _ok_enrich_result()],
+        )
+
+        response = client.post("/api/gallery/missing-enrich/start", json={
+            "items": [
+                {"file_path": "/video/XXX-999.mp4", "number": "XXX-999"},
+                {"file_path": "/video/SONE-205.mp4", "number": "SONE-205"},
+            ],
+        })
+
+        assert response.status_code == 200
+        status = _wait_missing_enrich(client)
+        assert status["state"] == "done"
+        assert status["current"] == 2
+        assert status["success_count"] == 1
+        assert status["failed_count"] == 1
 
 class TestScannerAPI:
     """測試 scanner.py 相關 endpoints"""
@@ -822,6 +947,54 @@ class TestScannerGenerateLongPathsField:
         # win32 平台上空目錄也應為空 list
         assert done_payload['long_paths'] == [], \
             "空目錄 / 非 win32 平台下 long_paths 應為 []"
+
+    def test_generate_rescans_when_file_size_changed(
+        self, client, tmp_path, monkeypatch, parse_sse_events
+    ):
+        """DB size=0 with unchanged mtime must be repaired by incremental scan."""
+        from unittest.mock import patch
+        from core.database import init_db, VideoRepository, Video
+        from core.path_utils import to_file_uri
+
+        scan_dir = tmp_path / "videos"
+        scan_dir.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        video_path = scan_dir / "AVOP-460-1.mp4"
+        video_path.write_bytes(b"x" * 4096)
+        stat = video_path.stat()
+
+        db_path = tmp_path / "test.db"
+        init_db(db_path)
+        repo = VideoRepository(db_path)
+        video_uri = to_file_uri(str(video_path))
+        repo.upsert(Video(
+            path=video_uri,
+            number="AVOP-460",
+            title="AVOP-460",
+            mtime=stat.st_mtime,
+            nfo_mtime=0.0,
+            size_bytes=0,
+        ), preserve_scan_fields=False)
+
+        monkeypatch.setattr("web.routers.scanner.load_config", lambda: {
+            "gallery": {
+                "directories": [str(scan_dir)],
+                "output_dir": str(output_dir),
+                "path_mappings": {},
+                "min_size_mb": 0,
+            },
+            "general": {"theme": "light"},
+            "scraper": {"video_extensions": [".mp4"]},
+        })
+
+        with patch("web.routers.scanner.get_db_path", return_value=db_path):
+            response = client.get("/api/gallery/generate")
+
+        assert response.status_code == 200
+        events = parse_sse_events(response.text)
+        assert any(e.get("type") == "done" for e in events)
+        assert repo.get_by_path(video_uri).size_bytes == stat.st_size
 
     def test_skipped_long_paths_captured_via_on_skip(
         self, client, tmp_path, monkeypatch, parse_sse_events

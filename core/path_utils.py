@@ -187,7 +187,10 @@ def expand_env_vars(path: str) -> str:
     # 處理 Unix 波浪號
     if path.startswith('~'):
         from pathlib import Path
-        return str(Path(path).expanduser())
+        expanded = str(Path(path).expanduser())
+        if CURRENT_ENV in ('linux', 'mac'):
+            return expanded.replace('\\', '/')
+        return expanded
 
     # 處理 Windows 環境變數 %USERPROFILE%
     if '%USERPROFILE%' in path.upper():
@@ -445,6 +448,12 @@ def uri_to_fs_path(uri: str) -> str:
         # 非 Windows drive-letter 且非 UNC → 還原前導 /
         if not (len(path) >= 2 and path[1] == ':') and not path.startswith('/'):
             path = '/' + path
+    elif path.startswith('file://'):
+        candidate = path[7:]
+        if len(candidate) >= 2 and candidate[1] == ':':
+            path = candidate
+        elif len(candidate) >= 3 and candidate[0] == '/' and candidate[2] == ':':
+            path = candidate[1:]
     path = unquote(path)
     try:
         return normalize_path(path)

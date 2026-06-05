@@ -33,6 +33,130 @@
     color: var(--text-secondary);
 }
 
+/* Folder Content Type */
+.folder-type-picker {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.folder-type-picker-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.folder-type-btn,
+.folder-item-type-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    min-height: 1.8rem;
+    padding: 0.25rem 0.65rem;
+    border: 1px solid var(--stroke-subtle);
+    border-radius: var(--fluent-radius-md);
+    background: color-mix(in oklch, var(--surface-1) 78%, transparent);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    line-height: 1;
+    cursor: pointer;
+    transition:
+        background-color var(--fluent-duration-fast) var(--fluent-ease-standard),
+        border-color var(--fluent-duration-fast) var(--fluent-ease-standard),
+        color var(--fluent-duration-fast) var(--fluent-ease-standard);
+}
+
+.folder-type-btn:hover,
+.folder-item-type-btn:hover {
+    background: color-mix(in oklch, var(--accent) 8%, var(--surface-1));
+    color: var(--text-primary);
+}
+
+.folder-type-btn.active,
+.folder-item-type-btn.active {
+    border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+    background: color-mix(in oklch, var(--accent) 14%, var(--surface-1));
+    color: var(--text-primary);
+}
+
+.folder-main {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.folder-text {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.folder-text .folder-path {
+    min-width: 8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.folder-type-badge {
+    flex: 0 0 auto;
+    padding: 0.15rem 0.45rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--stroke-subtle);
+    background: color-mix(in oklch, var(--surface-2) 70%, transparent);
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.folder-type-badge--uncensored {
+    border-color: color-mix(in oklch, var(--color-secondary) 45%, transparent);
+    background: color-mix(in oklch, var(--color-secondary) 12%, var(--surface-1));
+    color: var(--text-primary);
+}
+
+.folder-item-type {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0.25rem;
+}
+
+.folder-item-type-btn {
+    min-height: 1.65rem;
+    padding: 0.2rem 0.45rem;
+    font-size: 0.68rem;
+}
+
+@media (max-width: 640px) {
+    .folder-item {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .folder-main {
+        flex-basis: 100%;
+    }
+
+    .folder-item-type {
+        margin-left: 1.75rem;
+    }
+}
+
+.nfo-update-row .btn-nfo-update {
+    justify-content: center;
+    min-width: 7.5rem;
+    white-space: nowrap;
+}
+
 /* Mini Terminal - Compact Log */
 .mini-terminal {
     background: color-mix(in oklch, var(--color-base-200) 80%, transparent);

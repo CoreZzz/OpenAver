@@ -113,8 +113,78 @@
             <div class="settings-card-header"><i class="bi bi-collection"></i> {{ t('settings.tabs.sources') }}</div>
             <div class="card-body">
 
+                    <div class="settings-source-scope">
+                        <div class="settings-source-scope-head">
+                            <div>
+                                <div class="settings-source-scope-title">{{ t('settings.sources.search_scope_label') }}</div>
+                                <small class="settings-hint">{{ t('settings.sources.search_scope_hint') }}</small>
+                            </div>
+                            <label class="settings-source-alias-toggle">
+                                <input type="checkbox" class="toggle toggle-sm toggle-primary"
+                                       id="tryAllAliases"
+                                       x-model="form.tryAllAliases">
+                                <span>{{ t('settings.sources.try_all_aliases_label') }}</span>
+                            </label>
+                        </div>
+
+                        <div class="settings-source-mode-options"
+                             role="radiogroup"
+                             aria-label="{{ t('settings.sources.search_scope_label') }}">
+                            <template x-for="mode in sourceModeOptions" :key="mode.value">
+                                <button type="button"
+                                        class="settings-source-mode-btn"
+                                        :class="{ active: form.sourceMode === mode.value }"
+                                        :aria-checked="form.sourceMode === mode.value ? 'true' : 'false'"
+                                        role="radio"
+                                        @click="setSourceMode(mode.value)">
+                                    <i class="bi" :class="mode.icon"></i>
+                                    <span x-text="mode.label"></span>
+                                </button>
+                            </template>
+                        </div>
+
+                        <div class="settings-source-custom"
+                             x-show="form.sourceMode === 'custom'"
+                             x-cloak>
+                            <div class="settings-source-custom-head">
+                                <span>{{ t('settings.sources.custom_source_ids_label') }}</span>
+                                <small x-text="window.t('settings.sources.custom_selected_count', { count: customSelectedCount })"></small>
+                            </div>
+                            <div class="settings-source-checks">
+                                <template x-for="src in searchSelectableSources" :key="src.id">
+                                    <label class="settings-source-check"
+                                           :class="{ active: isCustomSourceSelected(src.id) }">
+                                        <input type="checkbox"
+                                               :checked="isCustomSourceSelected(src.id)"
+                                               @change="toggleCustomSource(src.id, $event.target.checked)">
+                                        <span x-text="src.display_name"></span>
+                                        <small x-text="src.is_censored ? window.t('settings.sources.cat_censored') : window.t('settings.sources.cat_uncensored')"></small>
+                                    </label>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div class="settings-source-query-row">
+                            <label class="settings-source-number-field">
+                                <span>{{ t('settings.sources.max_sources_per_search_label') }}</span>
+                                <input type="number"
+                                       id="maxSourcesPerSearch"
+                                       min="1"
+                                       :max="MAX_ENABLED_SOURCES"
+                                       x-model.number="form.maxSourcesPerSearch">
+                            </label>
+                            <label class="settings-source-number-field">
+                                <span>{{ t('settings.sources.max_queries_per_source_label') }}</span>
+                                <input type="number"
+                                       id="maxQueriesPerSource"
+                                       min="1"
+                                       max="8"
+                                       x-model.number="form.maxQueriesPerSource">
+                            </label>
+                        </div>
+                    </div>
+
                     <!-- ===== Section 2 — Active Row (Zone A) — 61c-1 structure ===== -->
-                    <!-- Batch bar: segmented 全開|無碼 control (64e-2) -->
                     <div class="settings-sources-batchbar">
                         <div class="settings-sources-batchbar-left">
                             <div class="settings-sources-segmented">
@@ -124,13 +194,6 @@
                                         :aria-pressed="(allBuiltinEnabled && !uncensoredMode) ? 'true' : 'false'"
                                         @click="if (uncensoredMode && enabledCount >= 10) { _flashCapAlert(); } else { enableAllToCap(); }">
                                     {{ t('settings.sources.select_all') }}
-                                </button>
-                                <button type="button"
-                                        id="sourcesUncensoredToggle"
-                                        :class="{ 'is-on': uncensoredMode }"
-                                        :aria-pressed="uncensoredMode ? 'true' : 'false'"
-                                        @click="uncensoredMode = true">
-                                    {{ t('settings.sources.uncensored_mode_label') }}
                                 </button>
                             </div>
                         </div>
@@ -846,6 +909,121 @@
                                 <input type="text" class="input input-bordered input-sm" id="videoExtensions"
                                     x-model="form.videoExtensions">
                                 <small class="settings-hint">{{ t('settings.scraper.video_extensions_hint') }}</small>
+                            </div>
+                        </div>
+
+                        <div class="settings-form-row settings-sidecar-row">
+                            <label class="row-label">
+                                {{ t('settings.sidecar.title') }}
+                                <small class="settings-hint">{{ t('settings.sidecar.hint') }}</small>
+                            </label>
+                            <div class="settings-sidecar-config">
+                                <div class="settings-source-mode-options settings-sidecar-mode-options"
+                                     role="radiogroup"
+                                     aria-label="{{ t('settings.sidecar.title') }}">
+                                    <button type="button"
+                                            class="settings-source-mode-btn"
+                                            :class="{ active: form.sidecarMode === 'alongside' }"
+                                            :aria-checked="form.sidecarMode === 'alongside' ? 'true' : 'false'"
+                                            role="radio"
+                                            @click="form.sidecarMode = 'alongside'">
+                                        <i class="bi bi-folder2-open"></i>
+                                        <span>{{ t('settings.sidecar.mode_alongside') }}</span>
+                                    </button>
+                                    <button type="button"
+                                            class="settings-source-mode-btn"
+                                            :class="{ active: form.sidecarMode === 'centralized' }"
+                                            :aria-checked="form.sidecarMode === 'centralized' ? 'true' : 'false'"
+                                            role="radio"
+                                            @click="form.sidecarMode = 'centralized'">
+                                        <i class="bi bi-archive"></i>
+                                        <span>{{ t('settings.sidecar.mode_centralized') }}</span>
+                                    </button>
+                                </div>
+
+                                <label class="settings-sidecar-field"
+                                       x-show="form.sidecarMode === 'centralized'"
+                                       x-cloak>
+                                    <span>{{ t('settings.sidecar.root_dir_label') }}</span>
+                                    <div class="settings-sidecar-path-input">
+                                        <input type="text"
+                                               class="input input-bordered input-sm"
+                                               id="sidecarRootDir"
+                                               x-model="form.sidecarRootDir"
+                                               :placeholder="window.t('settings.sidecar.root_dir_placeholder')">
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline btn-neutral"
+                                                @click="selectSidecarRootFolder()"
+                                                title="{{ t('settings.sidecar.select_root_title') }}"
+                                                aria-label="{{ t('settings.sidecar.select_root_title') }}">
+                                            <i class="bi bi-folder2-open"></i>
+                                        </button>
+                                    </div>
+                                </label>
+
+                                <div class="settings-sidecar-grid"
+                                     x-show="form.sidecarMode === 'centralized'"
+                                     x-cloak>
+                                    <label class="settings-sidecar-field">
+                                        <span>{{ t('settings.sidecar.layout_label') }}</span>
+                                        <input type="text" class="input input-bordered input-sm"
+                                               id="sidecarLayout"
+                                               x-model="form.sidecarLayout">
+                                    </label>
+                                    <label class="settings-sidecar-field">
+                                        <span>{{ t('settings.sidecar.nfo_filename_label') }}</span>
+                                        <input type="text" class="input input-bordered input-sm"
+                                               id="sidecarNfoFilename"
+                                               x-model="form.sidecarNfoFilename">
+                                    </label>
+                                    <label class="settings-sidecar-field">
+                                        <span>{{ t('settings.sidecar.cover_filename_label') }}</span>
+                                        <input type="text" class="input input-bordered input-sm"
+                                               id="sidecarCoverFilename"
+                                               x-model="form.sidecarCoverFilename">
+                                    </label>
+                                    <label class="settings-sidecar-field">
+                                        <span>{{ t('settings.sidecar.poster_filename_label') }}</span>
+                                        <input type="text" class="input input-bordered input-sm"
+                                               id="sidecarPosterFilename"
+                                               x-model="form.sidecarPosterFilename">
+                                    </label>
+                                    <label class="settings-sidecar-field">
+                                        <span>{{ t('settings.sidecar.fanart_filename_label') }}</span>
+                                        <input type="text" class="input input-bordered input-sm"
+                                               id="sidecarFanartFilename"
+                                               x-model="form.sidecarFanartFilename">
+                                    </label>
+                                    <label class="settings-sidecar-field">
+                                        <span>{{ t('settings.sidecar.extrafanart_dir_label') }}</span>
+                                        <input type="text" class="input input-bordered input-sm"
+                                               id="sidecarExtrafanartDir"
+                                               x-model="form.sidecarExtrafanartDir">
+                                    </label>
+                                </div>
+                                <small class="settings-hint"
+                                       x-show="form.sidecarMode === 'centralized'"
+                                       x-cloak>{{ t('settings.sidecar.template_hint') }}</small>
+                                <small class="settings-hint"
+                                       x-show="form.sidecarMode === 'alongside'"
+                                       x-cloak>{{ t('settings.sidecar.alongside_hint') }}</small>
+
+                                <div class="settings-sidecar-preview"
+                                     x-show="form.sidecarMode === 'centralized'"
+                                     x-cloak>
+                                    <div class="settings-sidecar-preview-title">
+                                        <i class="bi bi-signpost-split"></i>
+                                        <span>{{ t('settings.sidecar.preview_title') }}</span>
+                                    </div>
+                                    <div class="settings-sidecar-preview-list">
+                                        <template x-for="row in sidecarPreviewRows" :key="row.key">
+                                            <div class="settings-sidecar-preview-row">
+                                                <span x-text="row.label"></span>
+                                                <code x-text="row.value"></code>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

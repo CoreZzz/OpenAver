@@ -76,6 +76,85 @@ class TestVideoRepository:
         result = repo.get_by_path(sample_video.path)
         assert result.title == "修改後的標題"
 
+    def test_metadata_upsert_preserves_existing_scan_fields(self, temp_db, tmp_path):
+        """Metadata-only upserts must not reset size_bytes/mtime to unknown."""
+        repo = VideoRepository(temp_db)
+        uri = to_file_uri(str(tmp_path / "missing-but-known.mp4"))
+        repo.upsert(Video(
+            path=uri,
+            number="ABC-123",
+            title="Original",
+            size_bytes=4096,
+            mtime=1234.5,
+        ), preserve_scan_fields=False)
+
+        repo.upsert(Video(
+            path=uri,
+            number="ABC-123",
+            title="Updated metadata",
+        ))
+
+        result = repo.get_by_path(uri)
+        assert result.title == "Updated metadata"
+        assert result.size_bytes == 4096
+        assert result.mtime == 1234.5
+
+    def test_metadata_upsert_batch_preserves_existing_scan_fields(self, temp_db, tmp_path):
+        """Batch metadata-only updates must not reset size_bytes/mtime either."""
+        repo = VideoRepository(temp_db)
+        uri = to_file_uri(str(tmp_path / "batch-known.mp4"))
+        repo.upsert(Video(
+            path=uri,
+            number="ABC-123",
+            title="Original",
+            size_bytes=8192,
+            mtime=9876.5,
+        ), preserve_scan_fields=False)
+
+        inserted, updated = repo.upsert_batch([
+            Video(path=uri, number="ABC-123", title="Batch metadata"),
+        ])
+
+        result = repo.get_by_path(uri)
+        assert inserted == 0
+        assert updated == 1
+        assert result.title == "Batch metadata"
+        assert result.size_bytes == 8192
+        assert result.mtime == 9876.5
+
+    def test_metadata_upsert_hydrates_missing_scan_fields_from_disk(self, temp_db, tmp_path):
+        """If the file exists, a metadata-only insert fills size_bytes/mtime from stat."""
+        repo = VideoRepository(temp_db)
+        video_path = tmp_path / "real.mp4"
+        video_path.write_bytes(b"x" * 12345)
+        uri = to_file_uri(str(video_path))
+
+        repo.upsert(Video(path=uri, number="ABC-123", title="Metadata only"))
+
+        result = repo.get_by_path(uri)
+        assert result.size_bytes == video_path.stat().st_size
+        assert result.mtime == video_path.stat().st_mtime
+
+    def test_repair_missing_file_stats(self, temp_db, tmp_path):
+        """repair_missing_file_stats fixes historical size_bytes/mtime=0 rows."""
+        repo = VideoRepository(temp_db)
+        video_path = tmp_path / "corrupt.mp4"
+        video_path.write_bytes(b"x" * 2048)
+        uri = to_file_uri(str(video_path))
+        repo.upsert(Video(
+            path=uri,
+            number="ABC-123",
+            title="Corrupt scan fields",
+            size_bytes=0,
+            mtime=0.0,
+        ), preserve_scan_fields=False)
+
+        assert repo.repair_missing_file_stats() == 1
+
+        result = repo.get_by_path(uri)
+        assert result.size_bytes == video_path.stat().st_size
+        assert result.mtime == video_path.stat().st_mtime
+
     def test_upsert_batch_insert(self, temp_db):
         """測試 upsert_batch 批次新增"""
         repo = VideoRepository(temp_db)
@@ -178,6 +257,29 @@ class TestVideoRepository:
         assert len(index) == 2
         assert index[to_file_uri("/video1.mp4")] == (100.5, 100.0)
         assert index[to_file_uri("/video2.mp4")] == (200.5, 200.0)
+
+    def test_get_scan_index_includes_size_bytes(self, temp_db):
+        repo = VideoRepository(temp_db)
+
+        repo.upsert_batch([
+            Video(
+                path=to_file_uri("/video1.mp4"),
+                mtime=100.5,
+                nfo_mtime=100.0,
+                size_bytes=1234,
+            ),
+            Video(
+                path=to_file_uri("/video2.mp4"),
+                mtime=200.5,
+                nfo_mtime=200.0,
+                size_bytes=0,
+            ),
+        ])
+
+        index = repo.get_scan_index()
+
+        assert index[to_file_uri("/video1.mp4")] == (100.5, 100.0, 1234)
+        assert index[to_file_uri("/video2.mp4")] == (200.5, 200.0, 0)
 
     def test_delete_by_paths(self, temp_db):
         """測試 delete_by_paths"""

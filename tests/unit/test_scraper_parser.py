@@ -64,12 +64,9 @@ class TestExtractNumber:
         assert extract_number('stars-804_4K_60fps.mp4') == 'STARS-804'
 
     def test_fc2_no_second_hyphen(self):
-        """FC2 無第二橫線 FC2PPV-999999 - 被通用 regex 誤抓"""
-        # 目前 regex 只支援 FC2-PPV-\d+
-        # FC2PPV-999999 會被通用 regex 誤解析為 PPV-99999
-        # 這是已知限制，待未來優化
+        """FC2 無第二橫線 FC2PPV-999999 → canonical FC2-PPV-999999"""
         result = extract_number('FC2PPV-999999.avi')
-        assert result == 'PPV-99999'  # 誤抓結果，非預期但目前行為
+        assert result == 'FC2-PPV-999999'
 
     # --- suffix/ 後綴處理 ---
     # extract_number 會預處理清理 -UC/-UNCENSORED/-LEAK 等後綴

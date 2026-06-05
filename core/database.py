@@ -398,7 +398,37 @@ class VideoRepository:
                 conn.close()
         return self._columns_cache
 
-    def upsert(self, video: Video) -> int:
+    @staticmethod
+    def _hydrate_missing_scan_fields(video_dict: dict) -> None:
+        """Fill size_bytes/mtime from disk when a metadata-only upsert omits them."""
+        if (video_dict.get("size_bytes") or 0) > 0 and (video_dict.get("mtime") or 0) > 0:
+            return
+        path = video_dict.get("path") or ""
+        if not path:
+            return
+        try:
+            from core.path_utils import uri_to_fs_path
+            stat = Path(uri_to_fs_path(path)).stat()
+        except Exception:
+            return
+        if (video_dict.get("size_bytes") or 0) <= 0:
+            video_dict["size_bytes"] = stat.st_size
+        if (video_dict.get("mtime") or 0) <= 0:
+            video_dict["mtime"] = stat.st_mtime
+
+    @staticmethod
+    def _upsert_assignment(col: str, preserve_scan_fields: bool = True) -> str:
+        if col == "user_tags":
+            return "user_tags = CASE WHEN excluded.user_tags = '[]' THEN videos.user_tags ELSE excluded.user_tags END"
+        if preserve_scan_fields and col in {"size_bytes", "mtime"}:
+            return (
+                f"{col} = CASE "
+                f"WHEN excluded.{col} IS NULL OR excluded.{col} = 0 THEN videos.{col} "
+                f"ELSE excluded.{col} END"
+            )
+        return f"{col} = excluded.{col}"
+
+    def upsert(self, video: Video, preserve_scan_fields: bool = True) -> int:
         """新增或更新影片（根據 path 判斷）
 
         Returns:
@@ -413,6 +443,8 @@ class VideoRepository:
             video_dict.pop('id', None)
             video_dict.pop('created_at', None)
             video_dict.pop('updated_at', None)
+            if preserve_scan_fields:
+                self._hydrate_missing_scan_fields(video_dict)
 
             columns = list(video_dict.keys())
             placeholders = ', '.join(['?'] * len(columns))
@@ -420,13 +452,7 @@ class VideoRepository:
             for col in columns:
                 if col == 'path':
                     continue
-                elif col == 'user_tags':
-                    # user_tags = '[]' 時視同「不更新」，保留 DB 現有值
-                    update_parts.append(
-                        "user_tags = CASE WHEN excluded.user_tags = '[]' THEN videos.user_tags ELSE excluded.user_tags END"
-                    )
-                else:
-                    update_parts.append(f"{col} = excluded.{col}")
+                update_parts.append(self._upsert_assignment(col, preserve_scan_fields))
             update_clause = ', '.join(update_parts)
 
             sql = f"""
@@ -454,7 +480,7 @@ class VideoRepository:
         finally:
             conn.close()
 
-    def upsert_batch(self, videos: List[Video]) -> tuple:
+    def upsert_batch(self, videos: List[Video], preserve_scan_fields: bool = True) -> tuple:
         """批次新增或更新
 
         Returns:
@@ -481,6 +507,8 @@ class VideoRepository:
                 video_dict.pop('id', None)
                 video_dict.pop('created_at', None)
                 video_dict.pop('updated_at', None)
+                if preserve_scan_fields:
+                    self._hydrate_missing_scan_fields(video_dict)
 
                 columns = list(video_dict.keys())
                 placeholders_sql = ', '.join(['?'] * len(columns))
@@ -488,13 +516,7 @@ class VideoRepository:
                 for col in columns:
                     if col == 'path':
                         continue
-                    elif col == 'user_tags':
-                        # user_tags = '[]' 時視同「不更新」，保留 DB 現有值
-                        update_parts.append(
-                            "user_tags = CASE WHEN excluded.user_tags = '[]' THEN videos.user_tags ELSE excluded.user_tags END"
-                        )
-                    else:
-                        update_parts.append(f"{col} = excluded.{col}")
+                    update_parts.append(self._upsert_assignment(col, preserve_scan_fields))
                 update_clause = ', '.join(update_parts)
 
                 sql = f"""
@@ -560,6 +582,62 @@ class VideoRepository:
             cursor.execute("SELECT path, mtime, nfo_mtime FROM videos")
             rows = cursor.fetchall()
             return {row[0]: (row[1], row[2]) for row in rows}
+        finally:
+            conn.close()
+
+    def get_scan_index(self) -> dict:
+        """Return path -> (mtime, nfo_mtime, size_bytes) for incremental scanning."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("SELECT path, mtime, nfo_mtime, size_bytes FROM videos")
+            rows = cursor.fetchall()
+            return {row[0]: (row[1], row[2], row[3] or 0) for row in rows}
+        finally:
+            conn.close()
+
+    def repair_missing_file_stats(self, paths: List[str] = None) -> int:
+        """Repair size_bytes/mtime for rows whose scan fields were lost."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            params: list = []
+            where = "(size_bytes IS NULL OR size_bytes <= 0 OR mtime IS NULL OR mtime <= 0)"
+            if paths:
+                placeholders = ', '.join(['?'] * len(paths))
+                where = f"{where} AND path IN ({placeholders})"
+                params.extend(paths)
+            cursor.execute(f"SELECT path FROM videos WHERE {where}", params)
+            rows = cursor.fetchall()
+
+            repaired = 0
+            for (path,) in rows:
+                try:
+                    from core.path_utils import uri_to_fs_path
+                    stat = Path(uri_to_fs_path(path)).stat()
+                except Exception:
+                    continue
+                cursor.execute(
+                    """
+                    UPDATE videos
+                    SET size_bytes = ?, mtime = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE path = ?
+                    """,
+                    (stat.st_size, stat.st_mtime, path),
+                )
+                if cursor.rowcount:
+                    repaired += cursor.rowcount
+
+            conn.commit()
+            if repaired:
+                try:
+                    from core.similar.ranker_cache import SimilarRankerCache
+                    SimilarRankerCache.invalidate()
+                except Exception:
+                    logger.exception("SimilarRankerCache invalidate failed (non-fatal)")
+            return repaired
         finally:
             conn.close()
 

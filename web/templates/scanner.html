@@ -24,12 +24,6 @@
             <p>{{ t('scanner.drag_overlay.hint') }}</p>
         </div>
     </div>
-    <!-- Header -->
-    <div class="avlist-header">
-        <h4><i class="bi bi-list-ul"></i> {{ t('scanner.page_title') }}</h4>
-        <div class="stats" id="headerStats"></div>
-    </div>
-
     <!-- Main Card: Folder List -->
     <div class="avlist-card">
         <div class="avlist-card-header">
@@ -70,8 +64,26 @@
                 <!-- Folder Items -->
                 <template x-for="(dir, idx) in directories" :key="idx">
                     <div class="folder-item">
-                        <i class="bi bi-folder folder-icon"></i>
-                        <span class="folder-path" x-text="dir"></span>
+                        <div class="folder-main">
+                            <i class="bi bi-folder folder-icon"></i>
+                            <div class="folder-text">
+                                <span class="folder-path" x-text="dir"></span>
+                            </div>
+                        </div>
+                        <div class="folder-item-type" role="group" :aria-label="window.t('scanner.folder.label_scope')">
+                            <button type="button" class="folder-item-type-btn"
+                                    :class="{ active: directoryLabel(dir) === 'censored' }"
+                                    @click="setDirectoryLabel(dir, 'censored')"
+                                    :title="window.t('scanner.folder.set_censored_title')">
+                                {{ t('scanner.folder.label_censored') }}
+                            </button>
+                            <button type="button" class="folder-item-type-btn"
+                                    :class="{ active: directoryLabel(dir) === 'uncensored' }"
+                                    @click="setDirectoryLabel(dir, 'uncensored')"
+                                    :title="window.t('scanner.folder.set_uncensored_title')">
+                                {{ t('scanner.folder.label_uncensored') }}
+                            </button>
+                        </div>
                         <button class="btn btn-sm btn-outline btn-error btn-remove"
                                 @click="removeDirectory(idx)" title="{{ t('scanner.folder.remove_title') }}">
                             <i class="bi bi-x"></i>
@@ -675,4 +687,3 @@
     </div>
 </div>
 {% endblock %}
-

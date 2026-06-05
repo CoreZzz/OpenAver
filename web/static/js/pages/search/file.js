@@ -13,7 +13,7 @@ function checkSubtitle(filename) {
     if (!filename) return false;
     const upper = filename.toUpperCase();
 
-    const patterns = ['-C', '_C'];
+    const patterns = ['-C', '_C', '-UC', '_UC'];
     for (const p of patterns) {
         const idx = upper.indexOf(p);
         if (idx !== -1) {
@@ -143,10 +143,14 @@ function extractChineseTitle(filename, number, actors = []) {
 function extractNumber(filename) {
     const basename = filename.split(/[/\\]/).pop().replace(/\.[^.]+$/, '');
 
+    const fc2Match = basename.match(/\bFC2[-_]?((PPV)[-_]?)?(\d{3,8})\b/i);
+    if (fc2Match) {
+        return `FC2-PPV-${fc2Match[3]}`;
+    }
+
     const patterns = [
-        /\b(FC2-PPV)-(\d{5,7})\b/i,          // FC2-PPV-1234567（優先）
         /\b([A-Z]+\d+-\d+)\b/i,              // T28-103 混合格式（字母+數字-數字）
-        /\b([A-Z]{1,5})-(\d{3,5})\b/i,       // SONE-205（支援單字母）
+        /\b([A-Z]{1,7})[-_](\d{2,5})\b/i,    // SONE-205 / SONE_205（支援單字母）
         /\b([A-Z]{2,5})(\d{3,5})\b/i,        // IPTD927（無連字號需 2+ 字母避免誤判）
     ];
 
@@ -154,10 +158,8 @@ function extractNumber(filename) {
         const match = basename.match(pattern);
         if (match) {
             const prefix = match[1].toUpperCase();
-            // FC2-PPV 特殊處理
-            if (prefix === 'FC2-PPV') return `FC2-PPV-${match[2]}`;
             // 混合格式已包含完整番號
-            if (pattern === patterns[1]) return prefix;
+            if (pattern === patterns[0]) return prefix;
             // 其他格式需組合
             return `${prefix}-${match[2]}`;
         }
@@ -200,13 +202,13 @@ async function parseFilenames(filenames) {
  */
 function formatNumber(input) {
     if (!input) return null;
+    const fc2Match = input.match(/FC2[-_]?((PPV)[-_]?)?(\d{3,8})/i);
+    if (fc2Match) {
+        return `FC2-PPV-${fc2Match[3]}`;
+    }
     const match = input.match(/([A-Z]{1,5})-?(\d{3,7})/i);
     if (match) {
         return `${match[1].toUpperCase()}-${match[2]}`;
-    }
-    const fc2Match = input.match(/FC2-?PPV-?(\d{5,7})/i);
-    if (fc2Match) {
-        return `FC2-PPV-${fc2Match[1]}`;
     }
     return input.toUpperCase();
 }

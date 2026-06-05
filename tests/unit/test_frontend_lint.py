@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 SHOWCASE_HTML = Path(__file__).parent.parent.parent / "web" / "templates" / "showcase.html"
+SHOWCASE_CSS = Path(__file__).parent.parent.parent / "web" / "static" / "css" / "pages" / "showcase.css"
 
 
 class TestShowcaseMetadataGuard:
@@ -28,12 +29,73 @@ class TestShowcaseMetadataGuard:
             "currentLightboxVideo?.label",
             "lb-details",
             "searchFromMetadata(currentLightboxVideo?.director)",
+            "searchFromMetadata(directoryLabelText(currentLightboxVideo?.directory_label), 'tag')",
+            "searchFromMetadata(variantLabelText('cracked'), 'tag')",
+            "searchFromMetadata(variantLabelText('subtitle_cn'), 'tag')",
         ]:
             assert expected in html, f"showcase.html missing: {expected!r}"
         # series searchFromMetadata (grid panel or lightbox)
         assert ("searchFromMetadata(video.series)" in html or
                 "searchFromMetadata(currentLightboxVideo?.series)" in html), \
             "showcase.html missing: series searchFromMetadata call"
+        for forbidden in [
+            "file.directory_label",
+            "directoryLabelText(file.directory_label)",
+            "file.variant_flags?.subtitle_cn",
+            "file.variant_flags?.cracked",
+            "lb-file-badge--dir",
+        ]:
+            assert forbidden not in html, f"showcase.html should keep file-level labels out of same-work files: {forbidden!r}"
+
+
+class TestShowcaseGridFooterBadgeGuard:
+    """守衛瀏覽圖片模式卡片底部只顯示番號與右側標籤。"""
+
+    def _grid_footer_block(self):
+        html = SHOWCASE_HTML.read_text(encoding="utf-8")
+        number_idx = html.index(':title="video.number"')
+        start = html.rindex('<div class="av-card-preview-footer">', 0, number_idx)
+        end = html.index('<div class="footer-hover"', number_idx)
+        return html[start:end]
+
+    def test_grid_footer_has_variant_badges_without_actor(self):
+        block = self._grid_footer_block()
+        assert "av-actress" not in block, "grid video footer should not render actresses"
+        for expected in [
+            'class="av-card-badges"',
+            "videoHasVariant(video, 'cracked')",
+            "variantLabelText('cracked')",
+            "videoHasVariant(video, 'subtitle_cn')",
+            "variantLabelText('subtitle_cn')",
+        ]:
+            assert expected in block, f"showcase.html grid footer missing variant badge binding: {expected}"
+
+    def test_grid_directory_label_is_rightmost_badge(self):
+        block = self._grid_footer_block()
+        cracked_idx = block.index("variantLabelText('cracked')")
+        subtitle_idx = block.index("variantLabelText('subtitle_cn')")
+        directory_idx = block.index("directoryLabelText(video.directory_label)")
+        assert cracked_idx < subtitle_idx < directory_idx, \
+            "grid footer should render cracked/subtitle badges before the rightmost directory label"
+
+    def test_grid_number_and_variant_badges_do_not_wrap_or_shrink(self):
+        css = SHOWCASE_CSS.read_text(encoding="utf-8")
+        selectors = {
+            ".showcase-grid .av-card-preview:not(.hero-card) .footer-default .av-num": [
+                "flex: 1 1 auto",
+                "white-space: nowrap",
+            ],
+            ".showcase-grid .av-card-preview:not(.hero-card) .footer-default .av-card-badges": [
+                "display: inline-flex",
+                "flex: 0 0 auto",
+                "white-space: nowrap",
+            ],
+        }
+        for selector, expected_rules in selectors.items():
+            assert selector in css, f"showcase.css missing scoped selector: {selector}"
+            block = css[css.index(selector): css.index("}", css.index(selector))]
+            for expected in expected_rules:
+                assert expected in block, f"{selector} CSS missing: {expected}"
 
 
 SEARCH_HTML = Path(__file__).parent.parent.parent / "web" / "templates" / "search.html"
@@ -89,6 +151,15 @@ class TestShowcaseCoreJsSearchableFields:
                     "release_date", "path", "director", "series", "label", "user_tags"}
         missing = required - fields
         assert not missing, f"showcase/state-videos.js searchable missing: {sorted(missing)}"
+        for expected in [
+            "variantSearchLabels(video)",
+            "variantSearchLabels(file)",
+            "directoryLabelText(video.directory_label)",
+            "directoryLabelText(file.directory_label)",
+            "directorySearchLabels(video.directory_label)",
+            "directorySearchLabels(file.directory_label)",
+        ]:
+            assert expected in js, f"showcase/state-videos.js searchable missing: {expected!r}"
 
 
 SETTINGS_HTML = Path(__file__).parent.parent.parent / "web" / "templates" / "settings.html"
@@ -2318,6 +2389,40 @@ class TestMissingEnrichConfirmGuard:
             "scanner.html 缺少 cancelLargeMissingEnrich 綁定"
         assert "confirmLargeMissingEnrich" in html, \
             "scanner.html 缺少 confirmLargeMissingEnrich 綁定"
+
+    def test_scanner_folder_type_picker_removed_but_row_buttons_remain(self):
+        """Scanner folder type chooser is row-level only."""
+        html = self._html()
+        assert "class=\"avlist-header\"" not in html
+        assert "folder-type-picker" not in html
+        assert "folder-type-badge" not in html
+        assert "setDirectoryLabel(dir, 'censored')" in html
+        assert "setDirectoryLabel(dir, 'uncensored')" in html
+
+    def test_missing_enrich_uses_background_job_endpoints(self):
+        """Missing enrich should start a background job and poll status."""
+        js = self._js()
+        body = self._extract_function_body(js, "runMissingEnrich")
+        assert "/api/gallery/missing-enrich/start" in body
+        assert "/api/batch-enrich" not in body
+        assert "startMissingEnrichPolling()" in body
+        assert "AbortController" not in body
+
+    def test_scanner_cleanup_stops_missing_enrich_polling_without_abort(self):
+        """Leaving Scanner should not abort background enrich work."""
+        scan_js = SCANNER_SCAN_JS.read_text(encoding="utf-8")
+        cleanup_idx = scan_js.find("cleanup: () =>")
+        assert cleanup_idx >= 0
+        cleanup_body = scan_js[cleanup_idx:cleanup_idx + 900]
+        assert "stopMissingEnrichPolling()" in cleanup_body
+        assert "_enrichAbortController" not in cleanup_body
+        assert "avlist_enrich_pending" not in cleanup_body
+
+    def test_scanner_init_restores_missing_enrich_status(self):
+        """Scanner init should reattach to a running background enrich job."""
+        scan_js = SCANNER_SCAN_JS.read_text(encoding="utf-8")
+        assert "restoreMissingEnrichStatus()" in scan_js
+        assert "/api/gallery/missing-enrich/status" in self._js()
 
     def test_all_locales_have_missing_enrich_confirm_keys(self):
         """四語系都有 6 個 missing_enrich_confirm_* keys（純文字）"""

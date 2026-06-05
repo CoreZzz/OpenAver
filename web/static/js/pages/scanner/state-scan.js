@@ -2,6 +2,8 @@ export function stateScan() {
     return {
         // ===== Data State =====
         directories: [],
+        directoryLabels: {},
+        pendingDirectoryLabel: 'censored',
         config: {},
         configDirty: false,
 
@@ -75,7 +77,7 @@ export function stateScan() {
         // ===== Computed Properties =====
         get isFolderDirty() {
             if (!this.folderSnapshot) return false;
-            return JSON.stringify(this.directories) !== this.folderSnapshot;
+            return this.folderStateSnapshot() !== this.folderSnapshot;
         },
 
         get outputPathDisplay() {
@@ -158,7 +160,7 @@ export function stateScan() {
             this.restoreLogs();
 
             // T10: 觸發 missing check（loadStats 後）
-            this.checkMissing();
+            await this.checkMissing();
 
             // T10: restore pending enrich
             const pending = localStorage.getItem('avlist_enrich_pending');
@@ -171,6 +173,8 @@ export function stateScan() {
                     }
                 } catch { localStorage.removeItem('avlist_enrich_pending'); }
             }
+
+            await this.restoreMissingEnrichStatus();
 
             // T5.1: 接入統一 page lifecycle
             if (window.__registerPage) {
@@ -213,14 +217,7 @@ export function stateScan() {
                             this._jellyfinCheckController = null;
                         }
                         this.jellyfinCheckState = 'idle';
-                        // T10: save pending enrich items on leave
-                        if (this.state === 'enriching' && this.missingItems.length > this.missingEnrichOffset) {
-                            localStorage.setItem('avlist_enrich_pending', JSON.stringify(this.missingItems.slice(this.missingEnrichOffset)));
-                        }
-                        if (this._enrichAbortController) {
-                            this._enrichAbortController.abort();
-                            this._enrichAbortController = null;
-                        }
+                        this.stopMissingEnrichPolling();
                     }
                 });
             }
@@ -229,7 +226,7 @@ export function stateScan() {
         // ===== Leave Guard =====
         shouldWarnBeforeLeave() {
             // T7b: 改為讀取 Alpine state，而非全域變數
-            if (this.isGenerating) {
+            if (this.state === 'generating' || this.state === 'nfoUpdating' || this.state === 'jellyfinUpdating') {
                 return {
                     shouldWarn: true,
                     message: '生成正在進行中，離開將會中斷操作！',
@@ -255,6 +252,46 @@ export function stateScan() {
         },
 
         // ===== Config Methods =====
+        normalizeDirectoryLabel(label) {
+            return label === 'uncensored' ? 'uncensored' : 'censored';
+        },
+
+        normalizedDirectoryLabels() {
+            const labels = {};
+            (this.directories || []).forEach((dir) => {
+                labels[dir] = this.normalizeDirectoryLabel(this.directoryLabels?.[dir]);
+            });
+            return labels;
+        },
+
+        folderStateSnapshot() {
+            return JSON.stringify({
+                directories: this.directories || [],
+                directoryLabels: this.normalizedDirectoryLabels()
+            });
+        },
+
+        directoryLabel(dir) {
+            return this.normalizeDirectoryLabel(this.directoryLabels?.[dir]);
+        },
+
+        directoryLabelText(dir) {
+            const label = this.directoryLabel(dir);
+            return label === 'uncensored'
+                ? window.t('scanner.folder.label_uncensored')
+                : window.t('scanner.folder.label_censored');
+        },
+
+        setPendingDirectoryLabel(label) {
+            this.pendingDirectoryLabel = this.normalizeDirectoryLabel(label);
+        },
+
+        setDirectoryLabel(dir, label) {
+            const normalized = this.normalizeDirectoryLabel(label);
+            this.directoryLabels = { ...this.directoryLabels, [dir]: normalized };
+            this.configDirty = true;
+        },
+
         async loadConfig() {
             this.folderSnapshot = null;
 
@@ -264,11 +301,13 @@ export function stateScan() {
                 if (result.success) {
                     this.config = result.data;
                     this.directories = this.config.gallery?.directories || [];
+                    this.directoryLabels = this.config.gallery?.directory_labels || {};
+                    this.directoryLabels = this.normalizedDirectoryLabels();
 
                     // T7b: 不再需要同步全域變數（core.js 已刪除）
 
                     // 建立快照
-                    this.folderSnapshot = JSON.stringify(this.directories);
+                    this.folderSnapshot = this.folderStateSnapshot();
                 }
             } catch (e) {
                 console.error('載入設定失敗:', e);
@@ -279,6 +318,7 @@ export function stateScan() {
             try {
                 this.config.gallery = this.config.gallery || {};
                 this.config.gallery.directories = this.directories;
+                this.config.gallery.directory_labels = this.normalizedDirectoryLabels();
 
                 const resp = await fetch('/api/config', {
                     method: 'PUT',
@@ -288,7 +328,7 @@ export function stateScan() {
                 const result = await resp.json();
                 if (result.success) {
                     this.configDirty = false;
-                    this.folderSnapshot = JSON.stringify(this.directories);
+                    this.folderSnapshot = this.folderStateSnapshot();
                     this.showToast('設定已儲存', 'success');
                     return true;
                 } else {
@@ -432,9 +472,13 @@ export function stateScan() {
             }
         },
 
-        addFolderPath(folderPath) {
+        addFolderPath(folderPath, label = this.pendingDirectoryLabel) {
             if (!this.directories.includes(folderPath)) {
                 this.directories.push(folderPath);
+                this.directoryLabels = {
+                    ...this.directoryLabels,
+                    [folderPath]: this.normalizeDirectoryLabel(label)
+                };
                 this.configDirty = true;
             } else {
                 this.showToast(window.t('scanner.toast.folder_already_added'), 'warning');
@@ -460,12 +504,22 @@ export function stateScan() {
             }
 
             this.directories.push(path);
+            this.directoryLabels = {
+                ...this.directoryLabels,
+                [path]: this.normalizeDirectoryLabel(this.pendingDirectoryLabel)
+            };
             this.configDirty = true;
             this.manualPath = '';
         },
 
         removeDirectory(idx) {
+            const dir = this.directories[idx];
             this.directories.splice(idx, 1);
+            if (dir) {
+                const labels = { ...this.directoryLabels };
+                delete labels[dir];
+                this.directoryLabels = labels;
+            }
             this.configDirty = true;
         },
 
@@ -788,7 +842,7 @@ export function stateScan() {
                         this.checkMissing();
 
                         // 更新資料夾快照（generate 成功視為儲存）
-                        this.folderSnapshot = JSON.stringify(this.directories);
+                        this.folderSnapshot = this.folderStateSnapshot();
                     } else if (data.type === 'error') {
                         this.eventSource.close();
                         this.eventSource = null;

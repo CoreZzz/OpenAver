@@ -311,6 +311,12 @@
                              :alt="video.number"
                              loading="lazy"
                              @error="handleCoverError(video, $event)">
+                        <span class="av-file-count-badge"
+                              x-show="(video.files || []).length > 1"
+                              x-cloak>
+                            <i class="bi bi-collection-play" aria-hidden="true"></i>
+                            <span x-text="(video.files || []).length + ' ' + t('showcase.files.count_unit')"></span>
+                        </span>
                         <div class="av-card-preview-overlay">
                             <button class="btn-glass-circle"
                                     @click.stop="playVideo(video.path)"
@@ -341,8 +347,18 @@
                     </div>
                     <div class="av-card-preview-footer">
                         <div class="footer-default">
-                            <span class="av-num" x-text="video.number"></span>
-                            <span class="av-actress" x-text="video.actresses || t('showcase.grid.unknown_actor')"></span>
+                            <span class="av-num" :title="video.number" x-text="video.number"></span>
+                            <span class="av-card-badges">
+                                <span class="av-dir-label av-variant-label av-variant-label--cracked"
+                                      x-show="videoHasVariant(video, 'cracked')"
+                                      x-text="variantLabelText('cracked')"></span>
+                                <span class="av-dir-label av-variant-label av-variant-label--subtitle"
+                                      x-show="videoHasVariant(video, 'subtitle_cn')"
+                                      x-text="variantLabelText('subtitle_cn')"></span>
+                                <span class="av-dir-label"
+                                      :class="'av-dir-label--' + (video.directory_label || 'censored')"
+                                      x-text="directoryLabelText(video.directory_label)"></span>
+                            </span>
                         </div>
                         <div class="footer-hover" x-show="!infoVisible">
                             <div class="hover-title" x-text="video.title || t('showcase.grid.unknown_title')"></div>
@@ -418,6 +434,13 @@
                                 <td class="table-cell-index" x-text="getCurrentFilteredIndex(index) + 1"></td>
                                 <td class="table-cell-number">
                                     <span class="table-number-highlight" x-text="video.number"></span>
+                                    <span class="av-dir-label table-dir-label"
+                                          :class="'av-dir-label--' + (video.directory_label || 'censored')"
+                                          x-text="directoryLabelText(video.directory_label)"></span>
+                                    <span class="table-file-count"
+                                          x-show="(video.files || []).length > 1"
+                                          x-cloak
+                                          x-text="(video.files || []).length + ' ' + t('showcase.files.count_unit')"></span>
                                 </td>
                                 <td class="table-cell-title" x-text="video.title || t('showcase.grid.unknown_title')"></td>
                                 <td class="table-cell-actor" x-text="video.actresses || t('showcase.grid.unknown_actor')"></td>
@@ -456,6 +479,13 @@
                 <template x-for="(video, index) in paginatedVideos" :key="video.path">
                     <li class="list-item" @click="openLightbox(getCurrentFilteredIndex(index))">
                         <span class="list-number" x-text="video.number"></span>
+                        <span class="av-dir-label list-dir-label"
+                              :class="'av-dir-label--' + (video.directory_label || 'censored')"
+                              x-text="directoryLabelText(video.directory_label)"></span>
+                        <span class="list-file-count"
+                              x-show="(video.files || []).length > 1"
+                              x-cloak
+                              x-text="(video.files || []).length + ' ' + t('showcase.files.count_unit')"></span>
                         <span class="list-title" x-text="video.title || t('showcase.grid.unknown_title')"></span>
                         <span class="list-actor" x-show="video.actresses" x-text="`(${video.actresses})`"></span>
                     </li>
@@ -739,6 +769,23 @@
                             <!-- 分隔符 " · " 內嵌於各 span 開頭，隨 x-show 一起顯示/隱藏，避免孤立 · -->
                             <div class="lb-details">
                                 <span x-text="currentLightboxVideo?.number || t('showcase.lightbox.unknown_number')"></span>
+                                <a href="#"
+                                   class="lb-dir-label lb-meta-chip lb-link"
+                                   :class="'lb-dir-label--' + (currentLightboxVideo?.directory_label || 'censored')"
+                                   @click.prevent="searchFromMetadata(directoryLabelText(currentLightboxVideo?.directory_label), 'tag')"
+                                   x-text="directoryLabelText(currentLightboxVideo?.directory_label)"></a>
+                                <a href="#"
+                                   class="lb-dir-label lb-meta-chip lb-link"
+                                   x-show="videoHasVariant(currentLightboxVideo, 'cracked')"
+                                   x-cloak
+                                   @click.prevent="searchFromMetadata(variantLabelText('cracked'), 'tag')"
+                                   x-text="variantLabelText('cracked')"></a>
+                                <a href="#"
+                                   class="lb-dir-label lb-meta-chip lb-link"
+                                   x-show="videoHasVariant(currentLightboxVideo, 'subtitle_cn')"
+                                   x-cloak
+                                   @click.prevent="searchFromMetadata(variantLabelText('subtitle_cn'), 'tag')"
+                                   x-text="variantLabelText('subtitle_cn')"></a>
                                 <!-- 62b-1: 進階重刮 ⚙ 入口（番號旁 inline 細鈕，gate by 進階搜尋 toggle）-->
                                 <button type="button"
                                         class="lb-rescrape-gear"
@@ -778,6 +825,46 @@
                                 <span class="lb-size" x-show="currentLightboxVideo?.size">
                                     &nbsp;·&nbsp;<span x-text="formatSize(currentLightboxVideo?.size || 0)"></span>
                                 </span>
+                            </div>
+                            <div class="lb-files" x-show="(currentLightboxVideo?.files || []).length > 0" x-cloak>
+                                <div class="lb-files-title">
+                                    <i class="bi bi-collection-play" aria-hidden="true"></i>
+                                    <span x-text="t('showcase.files.title') + ' (' + (currentLightboxVideo?.files || []).length + ')'"></span>
+                                </div>
+                                <div class="lb-files-list">
+                                    <template x-for="file in (currentLightboxVideo?.files || [])" :key="file.path">
+                                        <div class="lb-file-item">
+                                            <div class="lb-file-main">
+                                                <span class="lb-file-part"
+                                                      x-show="file.part_index"
+                                                      x-cloak
+                                                      x-text="file.part_index"></span>
+                                                <span class="lb-file-text">
+                                                    <span class="lb-file-name"
+                                                          :title="file.filename"
+                                                          x-text="file.filename"></span>
+                                                    <span class="lb-file-meta">
+                                                        <span x-text="formatSize(file.size || 0)"></span>
+                                                    </span>
+                                                </span>
+                                            </div>
+                                            <button type="button"
+                                                    class="lb-file-play"
+                                                    @click.stop="playVideo(file.path)"
+                                                    :aria-label="t('showcase.files.play_file')"
+                                                    :data-tooltip="t('showcase.files.play_file')">
+                                                <i class="bi bi-play-fill" aria-hidden="true"></i>
+                                            </button>
+                                            <button type="button"
+                                                    class="lb-file-folder"
+                                                    @click.stop="openLocal(file.path)"
+                                                    :aria-label="t('showcase.files.open_folder')"
+                                                    :data-tooltip="t('showcase.files.open_folder')">
+                                                <i class="bi bi-folder2-open" aria-hidden="true"></i>
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
                             </div>
                             <!-- Row 5: Tags (with +N chips, T4) -->
                             <div class="lb-tags" x-show="currentLightboxVideo?.tags">

@@ -104,6 +104,78 @@ def test_malformed_entries_do_not_crash(monkeypatch):
     assert source_settings.get_enabled_source_ids() == ['dmm']
 
 
+def test_source_mode_censored_includes_censored_even_if_disabled(monkeypatch):
+    _patch_config(monkeypatch, {
+        'search': {'source_mode': 'censored'},
+        'sources': [
+            {'id': 'dmm', 'type': 'builtin', 'enabled': False, 'order': 0, 'manual_only': False},
+            {'id': 'fc2', 'type': 'builtin', 'enabled': True, 'order': 1, 'manual_only': False},
+        ],
+    })
+    assert source_settings.get_enabled_source_ids() == ['dmm']
+
+
+def test_source_mode_uncensored_includes_uncensored_even_if_disabled(monkeypatch):
+    _patch_config(monkeypatch, {
+        'search': {'source_mode': 'uncensored'},
+        'sources': [
+            {'id': 'javbus', 'type': 'builtin', 'enabled': True, 'order': 0, 'manual_only': False},
+            {'id': 'fc2', 'type': 'builtin', 'enabled': False, 'order': 1, 'manual_only': False},
+            {'id': 'avsox', 'type': 'builtin', 'enabled': True, 'order': 2, 'manual_only': False},
+        ],
+    })
+    assert source_settings.get_enabled_source_ids() == ['fc2', 'avsox']
+
+
+def test_source_mode_all_ignores_enabled_but_excludes_manual_beta(monkeypatch):
+    _patch_config(monkeypatch, {
+        'search': {'source_mode': 'all'},
+        'sources': [
+            {'id': 'dmm', 'type': 'builtin', 'enabled': False, 'order': 0, 'manual_only': False},
+            {'id': 'javbus', 'type': 'builtin', 'enabled': True, 'order': 1, 'manual_only': True},
+            {'id': 'javdb', 'type': 'builtin', 'enabled': True, 'order': 2, 'manual_only': False, 'is_beta': True},
+            {'id': 'fc2', 'type': 'builtin', 'enabled': False, 'order': 3, 'manual_only': False},
+        ],
+    })
+    assert source_settings.get_enabled_source_ids() == ['dmm', 'fc2']
+
+
+def test_source_mode_custom_uses_custom_ids_in_source_order(monkeypatch):
+    _patch_config(monkeypatch, {
+        'search': {'source_mode': 'custom', 'custom_source_ids': ['fc2', 'dmm']},
+        'sources': [
+            {'id': 'dmm', 'type': 'builtin', 'enabled': False, 'order': 0, 'manual_only': False},
+            {'id': 'javbus', 'type': 'builtin', 'enabled': True, 'order': 1, 'manual_only': False},
+            {'id': 'fc2', 'type': 'builtin', 'enabled': False, 'order': 2, 'manual_only': False},
+        ],
+    })
+    assert source_settings.get_enabled_source_ids() == ['dmm', 'fc2']
+
+
+def test_source_mode_max_sources_per_search_caps_result(monkeypatch):
+    _patch_config(monkeypatch, {
+        'search': {'source_mode': 'all', 'max_sources_per_search': 2},
+        'sources': [
+            {'id': 'dmm', 'type': 'builtin', 'enabled': True, 'order': 0, 'manual_only': False},
+            {'id': 'javbus', 'type': 'builtin', 'enabled': True, 'order': 1, 'manual_only': False},
+            {'id': 'fc2', 'type': 'builtin', 'enabled': True, 'order': 2, 'manual_only': False},
+        ],
+    })
+    assert source_settings.get_enabled_source_ids() == ['dmm', 'javbus']
+
+
+def test_invalid_source_mode_falls_back_to_enabled(monkeypatch):
+    _patch_config(monkeypatch, {
+        'search': {'source_mode': 'surprise'},
+        'sources': [
+            {'id': 'dmm', 'type': 'builtin', 'enabled': False, 'order': 0, 'manual_only': False},
+            {'id': 'fc2', 'type': 'builtin', 'enabled': True, 'order': 1, 'manual_only': False},
+        ],
+    })
+    assert source_settings.get_search_source_mode() == 'enabled'
+    assert source_settings.get_enabled_source_ids() == ['fc2']
+
+
 # ---------------------------------------------------------------------------
 # is_uncensored_mode_effective
 # ---------------------------------------------------------------------------
@@ -280,3 +352,18 @@ def test_fuzzy_search_sources_excludes_fake_fuzzy_sources():
 def test_fuzzy_search_sources_is_independent_constant():
     """FUZZY_SEARCH_SOURCES must be a distinct object from CENSORED_SOURCES, not reused."""
     assert FUZZY_SEARCH_SOURCES is not CENSORED_SOURCES
+
+
+def test_uncensored_source_mode_true():
+    assert source_settings.is_uncensored_mode_effective({
+        'search': {'source_mode': 'uncensored'},
+        'sources': [
+            {'id': 'dmm', 'type': 'builtin', 'enabled': True},
+        ],
+    }) is True
+
+
+def test_all_source_mode_not_uncensored():
+    assert source_settings.is_uncensored_mode_effective({
+        'search': {'source_mode': 'all', 'uncensored_mode_enabled': True},
+    }) is False

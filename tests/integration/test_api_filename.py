@@ -30,7 +30,7 @@ class TestParseFilename:
             "filenames": [
                 "SONE-205.mp4",
                 "[中文字幕] ABC-123.mkv",
-                "FC2-PPV-1234567.mp4"
+                "FC2PPV-1234567.mp4"
             ]
         })
         assert response.status_code == 200
@@ -41,6 +41,12 @@ class TestParseFilename:
         assert data["results"][1]["number"] == "ABC-123"
         assert data["results"][1]["has_subtitle"] is True
         assert data["results"][2]["number"] == "FC2-PPV-1234567"
+        assert "FC2-1234567" in data["results"][2]["number_aliases"]
+        assert data["results"][2]["source_queries"]["fc2"] == [
+            "FC2-PPV-1234567",
+            "FC2PPV-1234567",
+            "1234567",
+        ]
 
     def test_with_subtitle_markers(self):
         """測試字幕標記偵測"""
@@ -48,6 +54,7 @@ class TestParseFilename:
             "filenames": [
                 "ABC-123-C.mp4",        # -C 標記
                 "DEF-456_C.mkv",        # _C 標記
+                "SONE-103-UC.mp4",      # 破解 + 中文字幕
                 "[中文字幕] GHI-789.mp4",  # 中文字幕
                 "JKL-012 字幕.mp4",     # 字幕
                 "MNO-345.mp4"           # 無字幕
@@ -57,9 +64,11 @@ class TestParseFilename:
         data = response.json()
         assert data["results"][0]["has_subtitle"] is True   # -C
         assert data["results"][1]["has_subtitle"] is True   # _C
-        assert data["results"][2]["has_subtitle"] is True   # 中文字幕
-        assert data["results"][3]["has_subtitle"] is True   # 字幕
-        assert data["results"][4]["has_subtitle"] is False  # 無
+        assert data["results"][2]["has_subtitle"] is True   # -UC
+        assert data["results"][2]["variant_flags"]["cracked"] is True
+        assert data["results"][3]["has_subtitle"] is True   # 中文字幕
+        assert data["results"][4]["has_subtitle"] is True   # 字幕
+        assert data["results"][5]["has_subtitle"] is False  # 無
 
     def test_unparseable_filename(self):
         """測試無法解析的檔名"""

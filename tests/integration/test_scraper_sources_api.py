@@ -39,6 +39,7 @@ def test_200_and_schema(client, temp_config_path):
 
     assert "sources" in data and isinstance(data["sources"], list)
     assert "total_enabled" in data and isinstance(data["total_enabled"], int)
+    assert data["source_mode"] == "enabled"
     for s in data["sources"]:
         assert set(s.keys()) == SOURCE_FIELDS
         assert isinstance(s["id"], str)
@@ -73,6 +74,33 @@ def test_disabled_source_not_in_response(client, temp_config_path):
     ids = [s["id"] for s in data["sources"]]
     assert target_id not in ids
     assert data["total_enabled"] == 7
+
+
+def test_all_source_mode_includes_disabled_builtin(client, temp_config_path):
+    """Phase 1.5：source_mode=all 時 disabled builtin 仍納入 fan-out snapshot。"""
+    cfg = _base_config(client)
+    target_id = cfg["sources"][0]["id"]
+    cfg["search"]["source_mode"] = "all"
+    cfg["sources"][0]["enabled"] = False
+    assert client.put("/api/config", json=cfg).status_code == 200
+
+    data = client.get("/api/scraper-sources").json()
+    ids = [s["id"] for s in data["sources"]]
+    assert data["source_mode"] == "all"
+    assert target_id in ids
+    assert data["total_enabled"] == 8
+
+
+def test_uncensored_source_mode_filters_builtin_group(client, temp_config_path):
+    """Phase 1.5：source_mode=uncensored 時只揭露無碼 builtin。"""
+    cfg = _base_config(client)
+    cfg["search"]["source_mode"] = "uncensored"
+    assert client.put("/api/config", json=cfg).status_code == 200
+
+    data = client.get("/api/scraper-sources").json()
+    ids = [s["id"] for s in data["sources"]]
+    assert data["source_mode"] == "uncensored"
+    assert ids == ["d2pass", "heyzo", "fc2", "avsox"]
 
 
 def test_beta_source_not_in_response(client, temp_config_path):

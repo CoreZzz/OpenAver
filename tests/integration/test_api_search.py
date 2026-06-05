@@ -1402,3 +1402,23 @@ class TestBatchSearch:
         # summary.total 是去重後的數量（2），不是原始輸入數量（3）
         assert data['summary']['total'] == 2, \
             f"Expected summary.total == 2 (deduped), got {data['summary']['total']}"
+
+    def test_batch_search_dedup_variant_numbers_by_canonical_work(self, client, mocker):
+        """Phase 5：同作品變體只打一次外站，response 以 canonical key 回傳"""
+        def mock_smart_search(q, limit=1, **kwargs):
+            return [{'number': q, 'title': f'Title for {q}', 'cover_url': 'http://example.com/cover.jpg'}]
+
+        mock = mocker.patch('web.routers.search.smart_search', side_effect=mock_smart_search)
+
+        response = client.post('/api/batch-search', json={
+            'numbers': ['sone_103_uc', 'SONE-103-C', 'FC2PPV-1234567', 'FC2-1234567']
+        })
+        assert response.status_code == 200
+        data = response.json()
+
+        assert mock.call_count == 2
+        assert {call.args[0] for call in mock.call_args_list} == {'SONE-103', 'FC2-PPV-1234567'}
+        assert set(data['results'].keys()) == {'SONE-103', 'FC2-PPV-1234567'}
+        assert data['results']['SONE-103']['requested_numbers'] == ['sone_103_uc', 'SONE-103-C']
+        assert data['results']['FC2-PPV-1234567']['requested_numbers'] == ['FC2PPV-1234567', 'FC2-1234567']
+        assert data['summary']['total'] == 2

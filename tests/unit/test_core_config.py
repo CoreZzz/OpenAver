@@ -500,6 +500,95 @@ class TestMigrationPrimarySource:
         assert "search" in result
         assert "primary_source" not in result["search"]
 
+    def test_search_source_mode_defaults_added(self, tmp_path, monkeypatch):
+        """Phase 1.5：舊 search section 補齊 source_mode / query strategy 預設值"""
+        config_path = tmp_path / "config.json"
+        _write_config(config_path, {"search": {"proxy_url": ""}})
+        monkeypatch.setattr(core_config, "CONFIG_PATH", config_path)
+        monkeypatch.setattr(core_config, "CONFIG_DEFAULT_PATH", tmp_path / "config.default.json")
+
+        result = load_config()
+
+        search = result["search"]
+        assert search["source_mode"] == "enabled"
+        assert search["custom_source_ids"] == []
+        assert search["try_all_aliases"] is True
+        assert search["max_sources_per_search"] == 10
+        assert search["max_queries_per_source"] == 3
+
+    def test_sidecar_defaults_added(self, tmp_path, monkeypatch):
+        """Phase 3：舊 config 補齊 sidecar 獨立資料路徑預設值"""
+        config_path = tmp_path / "config.json"
+        _write_config(config_path, {"search": {"proxy_url": ""}})
+        monkeypatch.setattr(core_config, "CONFIG_PATH", config_path)
+        monkeypatch.setattr(core_config, "CONFIG_DEFAULT_PATH", tmp_path / "config.default.json")
+
+        result = load_config()
+
+        sidecar = result["sidecar"]
+        assert sidecar["mode"] == "alongside"
+        assert sidecar["root_dir"] == ""
+        assert sidecar["layout"] == "{maker}/{num}"
+        assert sidecar["nfo_filename"] == "{num}.nfo"
+        assert sidecar["cover_filename"] == "cover.jpg"
+        assert sidecar["poster_filename"] == "poster.jpg"
+        assert sidecar["fanart_filename"] == "fanart.jpg"
+        assert sidecar["extrafanart_dir"] == "extrafanart"
+
+    def test_sidecar_existing_values_preserved(self, tmp_path, monkeypatch):
+        """已有 centralized sidecar 設定時，不覆蓋使用者設定"""
+        config_path = tmp_path / "config.json"
+        _write_config(config_path, {
+            "sidecar": {
+                "mode": "centralized",
+                "root_dir": "D:/TV/Porn/Metadata",
+                "layout": "{actor}/{num}",
+            }
+        })
+        monkeypatch.setattr(core_config, "CONFIG_PATH", config_path)
+        monkeypatch.setattr(core_config, "CONFIG_DEFAULT_PATH", tmp_path / "config.default.json")
+
+        result = load_config()
+
+        sidecar = result["sidecar"]
+        assert sidecar["mode"] == "centralized"
+        assert sidecar["root_dir"] == "D:/TV/Porn/Metadata"
+        assert sidecar["layout"] == "{actor}/{num}"
+        assert sidecar["cover_filename"] == "cover.jpg"
+
+    def test_gallery_directory_labels_added_when_missing(self, tmp_path, monkeypatch):
+        """Scanner 目錄標籤 migration：舊 gallery.directories 保留，labels 補空 dict。"""
+        config_path = tmp_path / "config.json"
+        _write_config(config_path, {
+            "gallery": {
+                "directories": ["D:/TV/Porn/Censored"],
+                "output_dir": "output",
+            }
+        })
+        monkeypatch.setattr(core_config, "CONFIG_PATH", config_path)
+        monkeypatch.setattr(core_config, "CONFIG_DEFAULT_PATH", tmp_path / "config.default.json")
+
+        result = load_config()
+
+        assert result["gallery"]["directories"] == ["D:/TV/Porn/Censored"]
+        assert result["gallery"]["directory_labels"] == {}
+
+    def test_gallery_directory_labels_preserved(self, tmp_path, monkeypatch):
+        """既有目錄標籤不得被 migration 覆蓋。"""
+        config_path = tmp_path / "config.json"
+        _write_config(config_path, {
+            "gallery": {
+                "directories": ["D:/TV/Porn/Uncensored"],
+                "directory_labels": {"D:/TV/Porn/Uncensored": "uncensored"},
+            }
+        })
+        monkeypatch.setattr(core_config, "CONFIG_PATH", config_path)
+        monkeypatch.setattr(core_config, "CONFIG_DEFAULT_PATH", tmp_path / "config.default.json")
+
+        result = load_config()
+
+        assert result["gallery"]["directory_labels"]["D:/TV/Porn/Uncensored"] == "uncensored"
+
 
 # ============ test_migration_openai ============
 

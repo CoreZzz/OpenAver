@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, List
 
 from core.path_utils import normalize_path
 from core.scrapers.utils import has_chinese, check_subtitle, strip_subtitle_markers
+from core.sidecar_paths import resolve_sidecar_paths
 from core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -331,6 +332,9 @@ def generate_nfo(
     summary: str = '',
     rating: Optional[float] = None,
     mpaa: str = 'JP-18+',
+    thumb_filename: Optional[str] = None,
+    poster_filename: Optional[str] = None,
+    fanart_filename: Optional[str] = None,
 ) -> bool:
     """
     生成 NFO 檔案
@@ -363,6 +367,9 @@ def generate_nfo(
 
     poster_suffix = '-poster' if has_poster else ''
     fanart_suffix = '-fanart' if has_fanart else ''
+    thumb_ref = thumb_filename or f"{basename}.jpg"
+    poster_ref = poster_filename or f"{basename}{poster_suffix}.jpg"
+    fanart_ref = fanart_filename or f"{basename}{fanart_suffix}.jpg"
 
     set_tag = (
         f"<set><name>{html.escape(series)}</name></set>" if series else "<set></set>"
@@ -388,9 +395,9 @@ def generate_nfo(
   <mpaa>{html.escape(mpaa)}</mpaa>
   {runtime_tag}
   {director_tag}
-  <poster>{html.escape(basename)}{poster_suffix}.jpg</poster>
-  <thumb>{html.escape(basename)}.jpg</thumb>
-  <fanart>{html.escape(basename)}{fanart_suffix}.jpg</fanart>
+  <poster>{html.escape(poster_ref)}</poster>
+  <thumb>{html.escape(thumb_ref)}</thumb>
+  <fanart>{html.escape(fanart_ref)}</fanart>
 '''
 
     # 演員
@@ -470,6 +477,20 @@ def find_subtitle_files(video_path: str) -> List[str]:
         for match in p.parent.glob(f"{stem_esc}.*.{ext}"):
             results.append(str(match))
     return results
+
+
+def _metadata_for_sidecar(metadata: Dict[str, Any], number: str, title: str, actors: List[str]) -> Dict[str, Any]:
+    sidecar_meta = dict(metadata or {})
+    sidecar_meta["number"] = number
+    sidecar_meta["title"] = title
+    sidecar_meta["actors"] = actors
+    sidecar_meta["maker"] = metadata.get("maker", "")
+    sidecar_meta["date"] = metadata.get("date", "")
+    return sidecar_meta
+
+
+def _ensure_parent(path: str) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
 def organize_file(
@@ -668,11 +689,14 @@ def organize_file(
                     logger.warning(f"字幕搬移失敗 {sub_path}: {e}")
 
         result['new_filename'] = target_path
+        sidecar_metadata = _metadata_for_sidecar(metadata, number, format_data['title'], actors)
+        sidecar_paths = resolve_sidecar_paths(target_path, sidecar_metadata, config)
 
         # 下載封面（檔名跟隨影片命名）
         img_url = metadata.get('cover', '')
         if img_url:
-            cover_path = os.path.join(target_dir, filename_base + '.jpg')
+            cover_path = sidecar_paths.cover_path
+            _ensure_parent(cover_path)
             if download_image(img_url, cover_path):
                 result['cover_path'] = cover_path
 
@@ -680,23 +704,25 @@ def organize_file(
         if config.get('jellyfin_mode') and result.get('cover_path'):
             cover_jpg = result['cover_path']
             # fanart = 原圖複製
-            fanart_path = os.path.join(target_dir, filename_base + '-fanart.jpg')
+            fanart_path = sidecar_paths.fanart_path
             try:
+                _ensure_parent(fanart_path)
                 shutil.copy2(cover_jpg, fanart_path)
                 result['fanart_path'] = fanart_path
             except Exception as e:
                 logger.warning(f"[!] Fanart 複製失敗: {e}")
             # poster = 裁切
-            poster_path = os.path.join(target_dir, filename_base + '-poster.jpg')
+            poster_path = sidecar_paths.poster_path
+            _ensure_parent(poster_path)
             if crop_to_poster(cover_jpg, poster_path):
                 result['poster_path'] = poster_path
 
         # extrafanart 下載（download_sample_images 控制，需 create_folder=True 才有 per-video 目錄）
         # create_folder=False 時多片共用同一資料夾，fanart1.jpg 會互相覆蓋，故禁用
-        if config.get('download_sample_images') and config.get('create_folder'):
+        if config.get('download_sample_images') and (config.get('create_folder') or sidecar_paths.mode == "centralized"):
             sample_images = metadata.get('sample_images', [])
             if sample_images:
-                extrafanart_dir = os.path.join(target_dir, 'extrafanart')
+                extrafanart_dir = sidecar_paths.extrafanart_dir
                 try:
                     os.makedirs(extrafanart_dir, exist_ok=True)
                     for i, url in enumerate(sample_images, 1):
@@ -709,9 +735,13 @@ def organize_file(
                     logger.warning(f"extrafanart 目錄建立失敗: {e}")
 
         # 生成 NFO（檔名跟隨影片命名）
-        nfo_path = os.path.join(target_dir, filename_base + '.nfo')
+        nfo_path = sidecar_paths.nfo_path
+        _ensure_parent(nfo_path)
         tags = metadata.get('tags', [])
         user_tags = metadata.get('user_tags', [])
+        cover_filename = Path(sidecar_paths.cover_path).name
+        poster_filename = Path(result.get('poster_path') or sidecar_paths.cover_path).name
+        fanart_filename = Path(result.get('fanart_path') or sidecar_paths.cover_path).name
         if generate_nfo(
             number=number,
             title=format_data['title'],
@@ -734,6 +764,9 @@ def organize_file(
             # （server re-search 路徑帶值；frontend-passed 路徑因 echo strip 無值 → default）
             summary=metadata.get('_summary', ''),
             rating=metadata.get('_rating'),
+            thumb_filename=cover_filename,
+            poster_filename=poster_filename,
+            fanart_filename=fanart_filename,
         ):
             result['nfo_path'] = nfo_path
 

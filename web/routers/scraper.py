@@ -18,6 +18,7 @@ from typing import List, Literal, Optional
 from core.database import VideoRepository
 from core.db_inflow import try_inflow_upsert
 from core.enricher import enrich_single, fetch_samples_only, resolve_nfo_cover_paths
+from core.filename_identity import parse_media_identity
 from core.organizer import organize_file
 from core.path_utils import to_file_uri, uri_to_fs_path
 from core.scraper import search_jav, search_jav_single_source, strip_internal_nfo_keys
@@ -29,6 +30,13 @@ from web.routers.notifications import emit_notification as _emit_notif
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api", tags=["scraper"])
+
+
+def _canonical_number_or_original(value: str | None) -> str | None:
+    if not value:
+        return value
+    identity = parse_media_identity(value)
+    return identity.search_number or identity.canonical_number or str(value).strip().upper()
 
 
 class ScrapeRequest(BaseModel):
@@ -67,6 +75,7 @@ def scrape_single(request: ScrapeRequest) -> dict:
     if not number:
         from core.scraper import extract_number
         number = extract_number(file_path)
+    number = _canonical_number_or_original(number)
 
     if not number:
         return {
@@ -93,9 +102,11 @@ def scrape_single(request: ScrapeRequest) -> dict:
     # 載入設定
     config = load_config()
     scraper_config = config.get('scraper', {})
+    organizer_config = dict(scraper_config)
+    organizer_config['sidecar'] = config.get('sidecar', {})
 
     # 執行整理（scraper_config 已包含 suffix_keywords，organize_file 自行偵測）
-    result = organize_file(file_path, metadata, scraper_config)
+    result = organize_file(file_path, metadata, organizer_config)
 
     # 覆蓋保護：目標路徑已存在時回傳 duplicate 狀態（不覆蓋）
     if result.get('duplicate'):
@@ -215,7 +226,11 @@ def enrich_single_endpoint(request: EnrichRequest) -> dict:
     # 故不得計入「保證會寫 sidecar」；補劇照請用 /api/scraper/fetch-samples（Codex PR#47 round-2 P2）。
     # 在 try 之前 raise，避免被下方 except Exception 吞成籠統 200。
     if request.mode == "refresh_full" and not request.overwrite_existing:
-        nfo_path, cover_path = resolve_nfo_cover_paths(request.file_path)
+        nfo_path, cover_path = resolve_nfo_cover_paths(
+            request.file_path,
+            config,
+            {"number": _canonical_number_or_original(request.number)},
+        )
         will_write_nfo = request.write_nfo and not os.path.exists(nfo_path)
         will_write_cover = request.write_cover and not os.path.exists(cover_path)
         if not will_write_nfo and not will_write_cover:
@@ -227,7 +242,7 @@ def enrich_single_endpoint(request: EnrichRequest) -> dict:
     try:
         result = enrich_single(
             file_path=request.file_path,
-            number=request.number,
+            number=_canonical_number_or_original(request.number) or request.number,
             mode=request.mode,
             write_nfo=request.write_nfo,
             write_cover=request.write_cover,
@@ -236,6 +251,7 @@ def enrich_single_endpoint(request: EnrichRequest) -> dict:
             proxy_url=proxy_url,
             source=request.source,
             javbus_lang=request.javbus_lang,
+            sidecar_config=config,
         )
         from dataclasses import asdict
         return asdict(result)
@@ -264,8 +280,9 @@ def fetch_samples_endpoint(req: FetchSamplesRequest) -> dict:
     try:
         result = fetch_samples_only(
             file_path=req.file_path,
-            number=req.number,
+            number=_canonical_number_or_original(req.number) or req.number,
             proxy_url=proxy_url,
+            sidecar_config=config,
         )
         from dataclasses import asdict
         return asdict(result)
@@ -319,6 +336,7 @@ async def batch_enrich_endpoint(request: BatchEnrichRequest):
                     )
                     effective_source = "auto"
                 effective_lang = item.javbus_lang or request.javbus_lang
+                canonical_item_number = _canonical_number_or_original(item.number) or item.number
 
                 # progress 事件
                 yield f"data: {json.dumps({'type': 'progress', 'current': idx, 'total': total, 'number': item.number})}\n\n"
@@ -329,11 +347,11 @@ async def batch_enrich_endpoint(request: BatchEnrichRequest):
                     # scraper cache（只對 refresh_full pre-fetch）
                     cached_data = None
                     if request.mode == "refresh_full":
-                        cache_key = (item.number.upper(), effective_source, effective_lang)
+                        cache_key = (canonical_item_number.upper(), effective_source, effective_lang)
                         if cache_key not in scraper_cache:
                             fetched = await loop.run_in_executor(
                                 None,
-                                lambda n=item.number, es=effective_source, el=effective_lang: search_jav(
+                                lambda n=canonical_item_number, es=effective_source, el=effective_lang: search_jav(
                                     n,
                                     source=es,
                                     proxy_url=proxy_url,
@@ -348,9 +366,9 @@ async def batch_enrich_endpoint(request: BatchEnrichRequest):
 
                     result = await loop.run_in_executor(
                         None,
-                        lambda i=item, sd=cached_data: enrich_single(
+                        lambda i=item, sd=cached_data, n=canonical_item_number: enrich_single(
                             file_path=i.file_path,
-                            number=i.number,
+                            number=n,
                             mode=request.mode,
                             write_nfo=request.write_nfo,
                             write_cover=request.write_cover,
@@ -360,6 +378,7 @@ async def batch_enrich_endpoint(request: BatchEnrichRequest):
                             source=effective_source if effective_source != "auto" else None,
                             javbus_lang=effective_lang,
                             scraper_data=sd,
+                            sidecar_config=config,
                         ),
                     )
                     from dataclasses import asdict

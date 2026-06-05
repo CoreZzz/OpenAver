@@ -93,35 +93,9 @@ def extract_number(filename: str) -> Optional[str]:
         >>> extract_number("T28-103.mp4")
         'T28-103'
     """
-    from pathlib import Path
-    basename = Path(filename).stem
+    from core.filename_identity import normalize_work_number
 
-    # 預處理 - 清理常見後綴（需有分隔符，避免誤刪 JUC-123 等合法前綴）
-    basename = re.sub(
-        r'[-_](UC|UNCEN|UNCENSORED|LEAK|LEAKED)(?=[-_.\s]|$)',
-        '', basename, flags=re.IGNORECASE
-    )
-
-    patterns = [
-        r'(FC2-PPV-\d+)',               # FC2-PPV-1234567
-        r'(\d{6}-\d{2,})',              # 041417-413 日期-編號格式（無碼）
-        r'(\d{6}_\d{2,})',             # 120415_201 / 082912_01 底線格式（無碼）
-        r'([A-Za-z]+\d+-\d+)',          # T28-103 混合格式
-        r'\[([A-Za-z]{1,6}-\d{3,5})\]', # [ABC-123] 方括號
-        r'([A-Za-z]{1,6}-\d{3,5})',     # ABC-123 帶橫線
-        r'([A-Za-z]{2,6})(\d{3,5})',    # ABC12345 不帶橫線
-        r'(\d{3}[A-Za-z]{3,4}-?\d{3,4})', # 123ABC-456 或 123ABC456
-    ]
-
-    for i, pattern in enumerate(patterns):
-        match = re.search(pattern, basename, re.IGNORECASE)
-        if match:
-            if i == 6:  # 不帶橫線需重組（ABC12345）
-                number = f"{match.group(1).upper()}-{match.group(2)}"
-            else:
-                number = match.group(1).upper()
-            return number
-    return None
+    return normalize_work_number(filename)
 
 
 def rate_limit(delay: float = 0.3) -> None:
@@ -212,6 +186,16 @@ def check_subtitle(filename: str) -> bool:
     """
     if not filename:
         return False
+
+    try:
+        from core.filename_identity import parse_media_identity
+
+        identity = parse_media_identity(filename)
+        if identity.variant_flags.subtitle_cn:
+            return True
+    except Exception:
+        # Keep legacy fallback below if the identity parser ever rejects input.
+        pass
 
     upper = filename.upper()
 

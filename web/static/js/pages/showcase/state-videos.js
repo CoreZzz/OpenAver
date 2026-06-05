@@ -287,6 +287,40 @@ export function stateVideos() {
         },
 
         // --- 資料處理 ---
+        directoryLabelText(label) {
+            return label === 'uncensored'
+                ? window.t('showcase.files.directory_uncensored')
+                : window.t('showcase.files.directory_censored');
+        },
+
+        directorySearchLabels(label) {
+            const key = label === 'uncensored'
+                ? 'showcase.files.directory_uncensored_search_aliases'
+                : 'showcase.files.directory_censored_search_aliases';
+            return [this.directoryLabelText(label)]
+                .concat(String(window.t(key) || '').split(/\s+/))
+                .filter(Boolean);
+        },
+
+        variantLabelText(flag) {
+            return flag === 'cracked'
+                ? window.t('showcase.files.cracked')
+                : window.t('showcase.files.subtitle_cn');
+        },
+
+        videoHasVariant(video, flag) {
+            if (video?.variant_flags?.[flag]) return true;
+            return (video?.files || []).some(file => file?.variant_flags?.[flag]);
+        },
+
+        variantSearchLabels(item) {
+            const labels = [];
+            if (item?.variant_label) labels.push(item.variant_label);
+            if (item?.variant_flags?.cracked) labels.push(this.variantLabelText('cracked'));
+            if (item?.variant_flags?.subtitle_cn) labels.push(this.variantLabelText('subtitle_cn'));
+            return labels;
+        },
+
         applyFilterAndSort(skipPagination) {
             // --- 搜尋篩選 (M4a) ---
             if (this.search && this.search.trim()) {
@@ -294,6 +328,15 @@ export function stateVideos() {
                 const terms = this.search.toLowerCase().trim().split(/\s+/).filter(t => t.length > 0);
 
                 var filtered = _videos.filter(video => {
+                    const filesSearchable = (video.files || []).map(file => [
+                        file.filename,
+                        file.number,
+                        file.variant_label,
+                        ...this.variantSearchLabels(file),
+                        file.directory_label,
+                        this.directoryLabelText(file.directory_label),
+                        ...this.directorySearchLabels(file.directory_label),
+                    ].filter(Boolean).join(' ')).join(' ');
                     const searchable = [
                         video.title,
                         video.original_title,
@@ -306,17 +349,24 @@ export function stateVideos() {
                         video.director,
                         video.series,
                         video.label,
-                        video.user_tags
+                        video.user_tags,
+                        video.directory_label,
+                        this.directoryLabelText(video.directory_label),
+                        ...this.directorySearchLabels(video.directory_label),
+                        ...this.variantSearchLabels(video),
+                        filesSearchable
                     ].filter(Boolean).join(' ').toLowerCase();
 
                     // 番號的正規化版本（移除空格和連字號）
-                    const numNorm = video.number ? video.number.toLowerCase().replace(/[\s\-]/g, '') : '';
+                    const numNorms = [video.number].concat((video.files || []).map(file => file.number || file.filename || ''))
+                        .filter(Boolean)
+                        .map(value => String(value).toLowerCase().replace(/[\s\-]/g, ''));
 
                     // 每個關鍵字都要匹配（AND 邏輯）
                     return terms.every(term => {
                         const termNorm = term.replace(/[\s\-]/g, '');
                         // 番號模糊匹配
-                        if (numNorm && numNorm.includes(termNorm)) return true;
+                        if (numNorms.some(numNorm => numNorm && numNorm.includes(termNorm))) return true;
                         // alias 展開 match：搜尋詞反查 alias group，任一 alias name 命中即可
                         var termNames = _nameToGroup[term] || [term];
                         if (termNames.some(function(n) { return searchable.includes(n.toLowerCase()); })) return true;

@@ -123,6 +123,42 @@ class TestShowcaseVideosUserTags:
         )
         assert video_no_tags["user_tags"] == []
 
+    def test_showcase_repairs_missing_file_size_before_response(self, client, tmp_path, mocker):
+        """Historical size_bytes/mtime=0 rows should not keep showing unknown size."""
+        video_dir = tmp_path / "videos"
+        video_dir.mkdir()
+        video_path = video_dir / "ABC-123.mp4"
+        video_path.write_bytes(b"x" * 8192)
+        video_uri = to_file_uri(str(video_path), {})
+
+        db_path = tmp_path / "showcase_repair.db"
+        init_db(db_path)
+        repo = VideoRepository(db_path)
+        repo.upsert(Video(
+            path=video_uri,
+            number="ABC-123",
+            title="Broken size",
+            size_bytes=0,
+            mtime=0.0,
+        ), preserve_scan_fields=False)
+
+        config = {
+            "gallery": {
+                "directories": [str(video_dir)],
+                "path_mappings": {},
+            },
+            "scraper": {"video_extensions": [".mp4"]},
+        }
+        mocker.patch("web.routers.showcase.get_db_path", return_value=db_path)
+        mocker.patch("web.routers.showcase.load_config", return_value=config)
+
+        response = client.get("/api/showcase/videos")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["videos"][0]["size"] == video_path.stat().st_size
+        assert repo.get_by_path(video_uri).size_bytes == video_path.stat().st_size
+
 
 # ============ has_cover / has_nfo Tests ============
 

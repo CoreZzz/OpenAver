@@ -364,6 +364,261 @@
 /* ========== 掃描來源 Active Row (Zone A) — 61c-1 structure ========== */
 /* Productionized from POC .smock-* classes (commit 1b941dc). */
 
+/* ─── Search scope strategy ─── */
+#settings-components .settings-source-scope {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 0.95rem;
+    margin-bottom: 1rem;
+    background: color-mix(in oklch, var(--surface-1) 55%, transparent);
+    border: 1px solid var(--stroke-subtle);
+    border-radius: var(--fluent-radius-lg);
+}
+
+#settings-components .settings-source-scope-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+#settings-components .settings-source-scope-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+#settings-components .settings-source-alias-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+#settings-components .settings-source-mode-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    gap: 0.5rem;
+}
+
+#settings-components .settings-source-mode-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-height: 2.25rem;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--surface-0);
+    border: 1px solid var(--stroke-subtle);
+    border-radius: var(--fluent-radius-md);
+    cursor: pointer;
+    transition: background var(--fluent-duration-fast) var(--fluent-ease-standard),
+                border-color var(--fluent-duration-fast) var(--fluent-ease-standard),
+                color var(--fluent-duration-fast) var(--fluent-ease-standard);
+}
+
+#settings-components .settings-source-mode-btn:hover {
+    color: var(--text-primary);
+    background: color-mix(in oklch, var(--surface-2) 70%, transparent);
+}
+
+#settings-components .settings-source-mode-btn.active {
+    color: var(--text-primary);
+    background: color-mix(in oklch, var(--accent) 10%, var(--surface-0));
+    border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+}
+
+#settings-components .settings-source-mode-btn.active i {
+    color: var(--accent);
+}
+
+#settings-components .settings-source-custom {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.75rem;
+    background: color-mix(in oklch, var(--surface-0) 60%, transparent);
+    border: 1px dashed var(--stroke-subtle);
+    border-radius: var(--fluent-radius-md);
+}
+
+#settings-components .settings-source-custom-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+#settings-components .settings-source-custom-head small {
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+#settings-components .settings-source-checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+#settings-components .settings-source-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 2rem;
+    padding: 0.35rem 0.6rem;
+    color: var(--text-secondary);
+    background: var(--surface-0);
+    border: 1px solid var(--stroke-subtle);
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+}
+
+#settings-components .settings-source-check.active {
+    color: var(--text-primary);
+    border-color: color-mix(in oklch, var(--accent) 38%, transparent);
+    background: color-mix(in oklch, var(--accent) 8%, var(--surface-0));
+}
+
+#settings-components .settings-source-check input {
+    accent-color: var(--accent);
+}
+
+#settings-components .settings-source-check small {
+    padding: 0.05rem 0.35rem;
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    background: color-mix(in oklch, var(--surface-2) 70%, transparent);
+    border-radius: var(--radius-pill);
+}
+
+#settings-components .settings-source-query-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+#settings-components .settings-source-number-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+#settings-components .settings-source-number-field input {
+    width: 4.5rem;
+    min-height: 2rem;
+    padding: 0.25rem 0.45rem;
+    color: var(--text-primary);
+    background: var(--surface-0);
+    border: 1px solid var(--stroke-subtle);
+    border-radius: var(--fluent-radius-md);
+}
+
+/* ─── Sidecar path settings ─── */
+#settings-components .settings-sidecar-config {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+#settings-components .settings-sidecar-mode-options {
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+
+#settings-components .settings-sidecar-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 0.6rem;
+}
+
+#settings-components .settings-sidecar-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+#settings-components .settings-sidecar-field input {
+    min-width: 0;
+}
+
+#settings-components .settings-sidecar-path-input {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+#settings-components .settings-sidecar-path-input input {
+    flex: 1 1 auto;
+}
+
+#settings-components .settings-sidecar-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    color: var(--text-secondary);
+    background: color-mix(in oklch, var(--surface-1) 68%, transparent);
+    border: 1px solid var(--stroke-subtle);
+    border-radius: var(--fluent-radius-md);
+}
+
+#settings-components .settings-sidecar-preview-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+#settings-components .settings-sidecar-preview-list {
+    display: grid;
+    gap: 0.35rem;
+}
+
+#settings-components .settings-sidecar-preview-row {
+    display: grid;
+    grid-template-columns: minmax(4.5rem, 7rem) minmax(0, 1fr);
+    gap: 0.5rem;
+    align-items: start;
+    min-width: 0;
+    font-size: 0.78rem;
+}
+
+#settings-components .settings-sidecar-preview-row span {
+    color: var(--text-muted);
+}
+
+#settings-components .settings-sidecar-preview-row code {
+    min-width: 0;
+    color: var(--text-primary);
+    font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
 /* ─── Batch operations bar ─── */
 #settings-components .settings-sources-batchbar {
     display: flex;

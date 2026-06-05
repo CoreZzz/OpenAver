@@ -13,19 +13,48 @@
 """
 from core.config import load_config
 from core.logger import get_logger
-from core.scrapers.utils import CENSORED_SOURCES
+from core.scrapers.utils import CENSORED_SOURCES, UNCENSORED_SOURCES
+from core.source_config import MAX_ENABLED_SOURCES
 
 logger = get_logger(__name__)
+
+SOURCE_MODES = {"enabled", "censored", "uncensored", "all", "custom"}
+
+
+def get_search_source_mode(config: dict | None = None) -> str:
+    """Return sanitized search.source_mode.
+
+    Unknown or missing values fall back to ``enabled`` to preserve legacy
+    behavior.
+    """
+    if config is None:
+        config = load_config()
+    search = config.get("search", {})
+    if not isinstance(search, dict):
+        return "enabled"
+    mode = search.get("source_mode", "enabled")
+    return mode if mode in SOURCE_MODES else "enabled"
 
 
 def get_enabled_source_ids(
     availability_map: dict[str, bool] | None = None,
+    source_mode: str | None = None,
 ) -> list[str]:
     """回傳 Runtime Auto Pool 的來源 id 清單（依 order 升冪）。
 
-    Runtime Auto Pool 過濾公式（design §2.2）：
+    Runtime Auto Pool 基礎過濾公式（design §2.2）：
         enabled is True AND manual_only is not True
         AND (type != 'metatube' OR available)
+
+    Phase 1.5 source_mode:
+    - enabled（預設）：沿用舊行為，只取 enabled=True。
+    - censored：取有碼來源（不要求 enabled=True）。
+    - uncensored：取無碼來源（不要求 enabled=True）。
+    - all：取所有可用來源（不要求 enabled=True）。
+    - custom：取 search.custom_source_ids 指定來源（不要求 enabled=True）。
+
+    所有模式都排除 manual_only / is_beta / unavailable metatube，並套用
+    search.max_sources_per_search 上限。
 
     - builtin（與所有非 metatube type）**bypass** availability gate（永遠視為 available）。
     - `availability_map=None`（B1 default）= 不 gate，等同全 available（含 metatube）。
@@ -41,13 +70,25 @@ def get_enabled_source_ids(
         logger.warning("config['sources'] 非 list（got=%r）：視為空", type(sources))
         return []
 
+    mode = source_mode if source_mode in SOURCE_MODES else get_search_source_mode(config)
+    search = config.get("search", {})
+    if not isinstance(search, dict):
+        search = {}
+    custom_ids = search.get("custom_source_ids", [])
+    if not isinstance(custom_ids, list):
+        custom_ids = []
+    custom_set = {sid for sid in custom_ids if isinstance(sid, str)}
+    max_sources = _max_sources_per_search(search)
+
     included: list[dict] = []
     for s in sources:
         if not isinstance(s, dict):
             continue
-        if s.get('enabled') is not True:
+        if not _mode_includes_source(s, mode, custom_set):
             continue
         if s.get('manual_only') is True:
+            continue
+        if s.get('is_beta') is True:
             continue
         # availability gate：非 metatype bypass；metatube 需 map 允許。
         if s.get('type') == 'metatube':
@@ -56,7 +97,7 @@ def get_enabled_source_ids(
         included.append(s)
 
     included.sort(key=lambda s: s.get('order', 0))
-    return [s.get('id') for s in included if s.get('id') is not None]
+    return [s.get('id') for s in included if s.get('id') is not None][:max_sources]
 
 
 def get_all_source_ids_ordered() -> list[str]:
@@ -94,6 +135,12 @@ def is_uncensored_mode_effective(config: dict) -> bool:
 
     防禦：缺失 key 不 raise。
     """
+    mode = get_search_source_mode(config)
+    if mode == "uncensored":
+        return True
+    if mode in {"censored", "all"}:
+        return False
+
     sources = config.get('sources')
     # 注意：空 `sources: []` 故意落到 legacy fallback（migration 未跑 → 信 legacy flag），
     # 不要把 `and sources` truthiness guard「簡化」掉 — 兩個 helper 對空 list 處理不對稱是設計。
@@ -110,3 +157,51 @@ def is_uncensored_mode_effective(config: dict) -> bool:
     if not isinstance(search, dict):
         return False
     return bool(search.get('uncensored_mode_enabled', False))
+
+
+def _mode_includes_source(source: dict, mode: str, custom_ids: set[str]) -> bool:
+    sid = source.get("id")
+    if not sid:
+        return False
+    if mode == "enabled":
+        return source.get("enabled") is True
+    if mode == "custom":
+        return sid in custom_ids
+    if mode == "all":
+        return True
+    if mode == "censored":
+        return _source_is_censored(source) is True
+    if mode == "uncensored":
+        return _source_is_censored(source) is False
+    return source.get("enabled") is True
+
+
+def _source_is_censored(source: dict) -> bool:
+    sid = source.get("id")
+    if sid in CENSORED_SOURCES:
+        return True
+    if sid in UNCENSORED_SOURCES:
+        return False
+
+    censored_type = (source.get("config") or {}).get("censored_type")
+    if censored_type == "uncensored":
+        return False
+    if censored_type == "censored":
+        return True
+
+    # Fall back to persisted computed field when present; unknown sources are
+    # conservatively treated as censored, mirroring SourceConfig.
+    if isinstance(source.get("is_censored"), bool):
+        return bool(source.get("is_censored"))
+    return True
+
+
+def _max_sources_per_search(search: dict) -> int:
+    raw = search.get("max_sources_per_search", MAX_ENABLED_SOURCES)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return MAX_ENABLED_SOURCES
+    if value < 1:
+        return 1
+    return min(value, MAX_ENABLED_SOURCES)

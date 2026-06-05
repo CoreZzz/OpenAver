@@ -32,6 +32,7 @@ from core.video_extensions import ZERO_SIZE_EXTENSIONS, get_video_extensions
 logger = get_logger(__name__)
 
 from core.database import VideoRepository, get_db_path, init_db
+from core.filename_identity import parse_media_identity
 from core.maker_mapping import load_prefix_mapping
 from core.source_config import validate_source_id
 from core.source_settings import is_uncensored_mode_effective
@@ -435,6 +436,16 @@ class BatchSearchRequest(BaseModel):
     include_covers: bool = True
 
 
+def _canonical_work_key(value: str) -> str:
+    identity = parse_media_identity(value)
+    return identity.work_key or identity.canonical_number or str(value or "").strip().upper()
+
+
+def _canonical_search_number(value: str) -> str:
+    identity = parse_media_identity(value)
+    return identity.search_number or identity.canonical_number or str(value or "").strip().upper()
+
+
 @router.post("/batch-search", summary="批量番號搜尋")
 def batch_search(body: BatchSearchRequest) -> dict:
     """
@@ -454,9 +465,17 @@ def batch_search(body: BatchSearchRequest) -> dict:
     }
     ```
     """
-    numbers = list(dict.fromkeys(
-        n.strip().upper() for n in body.numbers if isinstance(n, str) and n.strip()
-    ))
+    grouped_inputs: dict[str, list[str]] = {}
+    for raw in body.numbers:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        original = raw.strip()
+        key = _canonical_search_number(original)
+        grouped_inputs.setdefault(key, [])
+        if original not in grouped_inputs[key]:
+            grouped_inputs[key].append(original)
+
+    numbers = list(grouped_inputs.keys())
 
     if not numbers:
         return JSONResponse(status_code=400, content={"success": False, "error": "numbers 不可為空"})
@@ -476,10 +495,18 @@ def batch_search(body: BatchSearchRequest) -> dict:
             if data:
                 entry = strip_internal_nfo_keys(data[0])
                 entry['found'] = True
+                entry['canonical_number'] = num
+                entry['work_key'] = _canonical_work_key(num)
+                entry['requested_numbers'] = grouped_inputs.get(num, [num])
                 return num, entry
         except Exception:
             logger.error('batch_search: %s failed', num)
-        return num, {'found': False}
+        return num, {
+            'found': False,
+            'canonical_number': num,
+            'work_key': _canonical_work_key(num),
+            'requested_numbers': grouped_inputs.get(num, [num]),
+        }
 
     with ThreadPoolExecutor(max_workers=_BATCH_MAX_WORKERS) as executor:
         futures = {executor.submit(_search_one, num): num for num in numbers}
@@ -708,11 +735,14 @@ async def get_favorite_files() -> dict:
             folder = expand_env_vars(original_folder)
     except ValueError as e:
         logger.error("路徑轉換失敗: %s", e)
-        return {
-            "success": False,
-            "error": "路徑轉換失敗，請檢查我的最愛資料夾設定",
-            "folder": original_folder
-        }
+        if original_folder:
+            folder = original_folder
+        else:
+            return {
+                "success": False,
+                "error": "路徑轉換失敗，請檢查我的最愛資料夾設定",
+                "folder": original_folder
+            }
 
     folder_path = Path(folder)
     if not folder_path.exists():
@@ -858,6 +888,7 @@ async def get_local_status(numbers: str = Query(..., description="逗號分隔�
 
     Notes:
         - 大小寫不敏感比對
+        - 以 canonical work key 聚合同一作品的檔案變體
         - 限制單次查詢最多 100 個番號
     """
     # 解析番號列表
@@ -870,24 +901,33 @@ async def get_local_status(numbers: str = Query(..., description="逗號分隔�
     if len(number_list) > 100:
         number_list = number_list[:100]
 
-    # 查詢資料庫
     init_db()  # 確保 DB 存在
     repo = VideoRepository()
-    videos_by_number = repo.get_by_numbers(number_list)
+
+    videos_by_work: dict[str, list] = {}
+    for video in repo.get_all():
+        key = _canonical_work_key(video.number or video.path)
+        if key:
+            videos_by_work.setdefault(key, []).append(video)
 
     # 建立回應
     result = {}
     for number in number_list:
-        videos = videos_by_number.get(number, [])
+        work_key = _canonical_work_key(number)
+        videos = videos_by_work.get(work_key, [])
         if videos:
             result[number] = {
                 "exists": True,
                 "count": len(videos),
-                "paths": [v.path for v in videos]
+                "paths": [v.path for v in videos],
+                "canonical_number": work_key,
+                "work_key": work_key,
             }
         else:
             result[number] = {
-                "exists": False
+                "exists": False,
+                "canonical_number": work_key,
+                "work_key": work_key,
             }
 
     return result

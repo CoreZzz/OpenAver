@@ -365,8 +365,8 @@ class TestExpandEnvVars:
         import os
         monkeypatch.setattr(path_utils, 'CURRENT_ENV', 'linux')
         result = path_utils.expand_env_vars('~/test_dir')
-        home = os.path.expanduser('~')
-        assert result == os.path.join(home, 'test_dir')
+        home = os.path.expanduser('~').replace('\\', '/')
+        assert result == f'{home}/test_dir'
 
     def test_plain_path_passthrough(self, monkeypatch):
         """沒有環境變數的普通路徑，直接 normalize 回傳"""

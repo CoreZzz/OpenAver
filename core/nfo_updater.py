@@ -13,6 +13,7 @@ from core.logger import get_logger
 from core.nfo_utils import sanitize_nfo_bytes
 from core.path_utils import normalize_path, uri_to_fs_path
 from core.scraper import search_jav
+from core.title_placeholders import is_filename_placeholder_title
 
 logger = get_logger(__name__)
 
@@ -70,7 +71,7 @@ def needs_update(info: dict, has_nfo: bool = True) -> Tuple[bool, List[str]]:
     missing = []
 
     # 檢查各欄位
-    if not info.get('title'):
+    if not info.get('title') or is_filename_placeholder_title(info.get('title', ''), info.get('num', '')):
         missing.append('title')
     if not info.get('date'):
         missing.append('date')
@@ -277,10 +278,15 @@ def update_nfo_file(nfo_path: str, metadata: dict, info: dict) -> Tuple[bool, st
     changes = []
 
     # 補標題
-    if not info.get('title') and metadata.get('title'):
+    title_missing = not info.get('title') or is_filename_placeholder_title(info.get('title', ''), info.get('num', ''))
+    if title_missing and metadata.get('title'):
         # 保留 originaltitle
         existing_title = get_element_text(root, 'title')
-        if existing_title and not get_element_text(root, 'originaltitle'):
+        if (
+            existing_title
+            and not is_filename_placeholder_title(existing_title, info.get('num', ''))
+            and not get_element_text(root, 'originaltitle')
+        ):
             set_element_text(root, 'originaltitle', existing_title, after_tag='title')
         set_element_text(root, 'title', metadata['title'])
         modified = True
@@ -482,5 +488,3 @@ def update_videos_generator(
             stats['failed'] += 1
 
     return stats
-
-

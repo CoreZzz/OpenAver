@@ -14,12 +14,25 @@ from core.nfo_updater import parse_nfo
 from core.organizer import download_image, find_subtitle_files, generate_nfo
 from core.path_utils import to_file_uri, uri_to_fs_path
 from core.scraper import search_jav
+from core.sidecar_paths import resolve_sidecar_paths
+from core.title_placeholders import is_filename_placeholder_title
 
 logger = get_logger(__name__)
 
 VALID_MODES = {"fill_missing", "db_to_sidecar", "refresh_full"}
 
 _FILL_MISSING_REQUIRED = ["title", "actresses", "maker", "director", "series", "label", "tags", "release_date"]
+
+
+def _sidecar_meta(number: str, meta: dict) -> dict:
+    data = dict(meta or {})
+    data["number"] = number
+    data["num"] = number
+    return data
+
+
+def _ensure_parent(path: str) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
@@ -110,9 +123,9 @@ def _scraper_to_meta(data: dict) -> dict:
     }
 
 
-def _missing_fields(meta: dict) -> List[str]:
+def _missing_fields(meta: dict, number: str = "") -> List[str]:
     missing = []
-    if not meta.get("title"):
+    if not meta.get("title") or is_filename_placeholder_title(meta.get("title", ""), number):
         missing.append("title")
     if not meta.get("actresses"):
         missing.append("actresses")
@@ -131,11 +144,19 @@ def _missing_fields(meta: dict) -> List[str]:
     return missing
 
 
-def _merge_meta(base: dict, supplement: dict) -> tuple:
+def _merge_meta(base: dict, supplement: dict, number: str = "") -> tuple:
     """合併 base + supplement，回傳 (merged, fields_filled)"""
     merged = dict(base)
     filled = []
     for key in _FILL_MISSING_REQUIRED:
+        if key == "title":
+            if (
+                (not merged.get(key) or is_filename_placeholder_title(merged.get(key, ""), number))
+                and supplement.get(key)
+            ):
+                merged[key] = supplement[key]
+                filled.append(key)
+            continue
         if not merged.get(key) and supplement.get(key):
             merged[key] = supplement[key]
             filled.append(key)
@@ -162,14 +183,17 @@ def _write_nfo(
     overwrite_existing: bool,
     has_subtitle: bool,
     user_tags: List[str] = None,
+    sidecar_config: dict = None,
 ) -> bool:
     if not write_nfo:
         return False
 
-    nfo_path = str(Path(fs_path).with_suffix(".nfo"))
+    sidecar_paths = resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta), sidecar_config)
+    nfo_path = sidecar_paths.nfo_path
 
     if os.path.exists(nfo_path) and not overwrite_existing:
         return False
+    _ensure_parent(nfo_path)
 
     # 若未傳入 user_tags，從 DB 讀取現有值（確保不被覆蓋）
     if user_tags is None:
@@ -198,6 +222,9 @@ def _write_nfo(
         # DB/NFO base meta 無此欄 → default 空 plot / 無 rating tag。
         summary=meta.get("summary", ""),
         rating=meta.get("rating"),
+        thumb_filename=Path(sidecar_paths.cover_path).name,
+        poster_filename=Path(sidecar_paths.poster_path).name,
+        fanart_filename=Path(sidecar_paths.fanart_path).name,
     )
     return True
 
@@ -207,15 +234,20 @@ def _write_cover(
     cover_url: str,
     write_cover: bool,
     overwrite_existing: bool,
+    number: str = "",
+    meta: dict = None,
+    sidecar_config: dict = None,
 ) -> bool:
     if not write_cover:
         return False
     if not cover_url:
         return False
 
-    cover_path = str(Path(fs_path).with_suffix(".jpg"))
+    sidecar_paths = resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta or {}), sidecar_config)
+    cover_path = sidecar_paths.cover_path
     if os.path.exists(cover_path) and not overwrite_existing:
         return False
+    _ensure_parent(cover_path)
 
     return download_image(cover_url, cover_path)
 
@@ -224,12 +256,15 @@ def _write_extrafanart(
     fs_path: str,
     sample_images: List[str],
     write_extrafanart: bool,
+    number: str = "",
+    meta: dict = None,
+    sidecar_config: dict = None,
 ) -> List[str]:
     if not write_extrafanart or not sample_images:
         return []
 
-    parent = Path(fs_path).parent
-    extrafanart_dir = parent / "extrafanart"
+    sidecar_paths = resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta or {}), sidecar_config)
+    extrafanart_dir = Path(sidecar_paths.extrafanart_dir)
     os.makedirs(str(extrafanart_dir), exist_ok=True)
 
     written_uris: List[str] = []
@@ -241,6 +276,55 @@ def _write_extrafanart(
         except Exception as e:
             logger.warning("extrafanart %d 下載失敗: %s", i + 1, e)
     return written_uris
+
+
+def _existing_sidecar_cover_path(sidecar_paths) -> str:
+    """Return the first existing local cover candidate for current sidecar config."""
+    for candidate in (
+        sidecar_paths.cover_path,
+        sidecar_paths.poster_path,
+        sidecar_paths.fanart_path,
+    ):
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ""
+
+
+def _db_sync_local_assets(
+    repo: VideoRepository,
+    fs_path: str,
+    local_cover_path: str = "",
+    nfo_mtime: float = 0.0,
+    written_uris: List[str] = None,
+) -> None:
+    """Sync local sidecar assets without rewriting scraped metadata fields."""
+    updates = []
+    values = []
+    if local_cover_path and os.path.exists(local_cover_path):
+        updates.append("cover_path = ?")
+        values.append(to_file_uri(local_cover_path))
+    if nfo_mtime:
+        updates.append("nfo_mtime = ?")
+        values.append(nfo_mtime)
+
+    path_uri = to_file_uri(fs_path)
+    if updates:
+        conn = None
+        try:
+            conn = get_connection(repo.db_path)
+            conn.execute(
+                f"UPDATE videos SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE path = ?",
+                [*values, path_uri],
+            )
+            conn.commit()
+        except Exception as e:
+            logger.warning("DB local asset sync 失敗: %s", e)
+        finally:
+            if conn:
+                conn.close()
+
+    if written_uris:
+        repo.update_sample_images(path_uri, written_uris)
 
 
 def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a corpus field; corpus writes go via _db_upsert → repo.upsert which already has invalidate)
@@ -255,6 +339,7 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
     source: Optional[str] = None,
     javbus_lang: Optional[str] = None,
     scraper_data: Optional[dict] = None,
+    sidecar_config: dict = None,
 ) -> EnrichResult:
     _empty = EnrichResult(
         success=False,
@@ -315,14 +400,14 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
             meta = _video_to_meta(videos[0])
             source_used = "db"
         else:
-            nfo_p = Path(fs_path).with_suffix(".nfo")
+            nfo_p = Path(resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta), sidecar_config).nfo_path)
             if nfo_p.exists():
                 _, root = parse_nfo(str(nfo_p))
                 if root is not None:
                     meta = _nfo_to_meta(root)
                     source_used = "nfo"
 
-        missing = _missing_fields(meta)
+        missing = _missing_fields(meta, number=number)
         if missing:
             if scraper_data is None:
                 scraper_data = search_jav(number, proxy_url=proxy_url,
@@ -331,7 +416,7 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
                 _empty.error = f"找不到 {number} 的資料"
                 return _empty
             supplement = _scraper_to_meta(scraper_data)
-            meta, fields_filled = _merge_meta(meta, supplement)
+            meta, fields_filled = _merge_meta(meta, supplement, number=number)
             source_used = scraper_data.get("source", "scraper") or "scraper"
 
     has_subtitle = bool(find_subtitle_files(fs_path))
@@ -351,6 +436,7 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
             overwrite_existing=overwrite_existing,
             has_subtitle=has_subtitle,
             user_tags=preserved_user_tags,
+            sidecar_config=sidecar_config,
         )
     except PermissionError:
         _empty.error = "NFO 寫入失敗，請確認目錄寫入權限"
@@ -362,36 +448,49 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
         cover_url=cover_url,
         write_cover=write_cover,
         overwrite_existing=overwrite_existing,
+        number=number,
+        meta=meta,
+        sidecar_config=sidecar_config,
     )
 
     written_uris = _write_extrafanart(
         fs_path=fs_path,
         sample_images=meta.get("sample_images", []),
         write_extrafanart=write_extrafanart,
+        number=number,
+        meta=meta,
+        sidecar_config=sidecar_config,
     )
     extrafanart_written = len(written_uris)
+    sidecar_paths = resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta), sidecar_config)
+    nfo_path = Path(sidecar_paths.nfo_path)
+    nfo_mtime = nfo_path.stat().st_mtime if nfo_path.exists() else 0.0
+    local_cover = _existing_sidecar_cover_path(sidecar_paths)
 
     # DB upsert 在寫檔後執行，才能知道本地封面路徑
     # db_to_sidecar 不打 scraper 也不更新 DB（metadata 不變）
     if mode in ("refresh_full", "fill_missing") and source_used not in ("db", "nfo", ""):
-        local_cover = str(Path(fs_path).with_suffix(".jpg")) if cover_written else ""
-        nfo_path = Path(fs_path).with_suffix(".nfo")
-        nfo_mtime = nfo_path.stat().st_mtime if nfo_path.exists() else 0.0
         _db_upsert(repo, number, fs_path, meta, local_cover_path=local_cover,
                    nfo_mtime=nfo_mtime, written_uris=written_uris)
+    elif mode in ("refresh_full", "fill_missing"):
+        _db_sync_local_assets(
+            repo,
+            fs_path,
+            local_cover_path=local_cover,
+            nfo_mtime=nfo_mtime,
+            written_uris=written_uris,
+        )
 
     # nfo_mtime 獨立更新：不論 mode/source，只要 NFO 存在就同步 DB
     # 避免 analysis 永遠視為 missing_nfo
-    nfo_path = Path(fs_path).with_suffix(".nfo")
     if nfo_path.exists():
         conn = None
         try:
             path_uri = to_file_uri(fs_path)
-            nfo_mt = nfo_path.stat().st_mtime
             conn = get_connection(repo.db_path)
             conn.execute(
                 "UPDATE videos SET nfo_mtime = ? WHERE path = ? AND (nfo_mtime IS NULL OR nfo_mtime = 0)",
-                (nfo_mt, path_uri),
+                (nfo_mtime, path_uri),
             )
             conn.commit()
         except Exception as e:
@@ -456,8 +555,10 @@ def _db_upsert(
             user_tags=preserved_user_tags,
             sample_images=sample_imgs,
             duration=meta.get("duration"),
+            size_bytes=existing.size_bytes if existing else 0,
             cover_path=cover_uri,
             release_date=meta.get("release_date", ""),
+            mtime=existing.mtime if existing else 0.0,
             nfo_mtime=nfo_mtime,
         )
         repo.upsert(video)
@@ -475,6 +576,7 @@ def fetch_samples_only(
     file_path: str,
     number: str,
     proxy_url: str = "",
+    sidecar_config: dict = None,
 ) -> EnrichResult:
     """只補抓劇照：呼叫 scraper → 下載 extrafanart → 更新 DB sample_images。
     不寫 NFO / cover / 其他欄位。
@@ -507,7 +609,15 @@ def fetch_samples_only(
         return _empty
 
     sample_images = meta.get("sample_images", [])
-    written_uris = _write_extrafanart(fs_path, sample_images, write_extrafanart=True)
+    sidecar_meta = _sidecar_meta(number, _scraper_to_meta(meta))
+    written_uris = _write_extrafanart(
+        fs_path,
+        sample_images,
+        write_extrafanart=True,
+        number=number,
+        meta=sidecar_meta,
+        sidecar_config=sidecar_config,
+    )
 
     if written_uris:
         repo = VideoRepository()
@@ -525,7 +635,7 @@ def fetch_samples_only(
     )
 
 
-def resolve_nfo_cover_paths(file_path: str) -> tuple:
+def resolve_nfo_cover_paths(file_path: str, sidecar_config: dict = None, metadata: dict = None) -> tuple:
     """由影片 file_path 推導目標 NFO / cover 的 FS 路徑。
 
     復用 enrich_single / _write_nfo / _write_cover 的同一套路徑邏輯：
@@ -542,6 +652,5 @@ def resolve_nfo_cover_paths(file_path: str) -> tuple:
         fs_path = uri_to_fs_path(file_path)
     except Exception:
         fs_path = file_path
-    nfo_path = str(Path(fs_path).with_suffix(".nfo"))
-    cover_path = str(Path(fs_path).with_suffix(".jpg"))
-    return nfo_path, cover_path
+    sidecar_paths = resolve_sidecar_paths(fs_path, metadata or {}, sidecar_config)
+    return sidecar_paths.nfo_path, sidecar_paths.cover_path

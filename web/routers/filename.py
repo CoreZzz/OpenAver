@@ -9,7 +9,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
-from core.scrapers.utils import extract_number, check_subtitle
+from core.filename_identity import parse_media_identity
 
 router = APIRouter(prefix="/api", tags=["filename"])
 
@@ -25,6 +25,16 @@ class ParsedFile(BaseModel):
     """單個檔案解析結果"""
     filename: str
     number: Optional[str] = None
+    canonical_number: Optional[str] = None
+    search_number: Optional[str] = None
+    display_number: Optional[str] = None
+    work_key: Optional[str] = None
+    number_aliases: List[str] = Field(default_factory=list)
+    source_queries: dict[str, List[str]] = Field(default_factory=dict)
+    part_index: Optional[str] = None
+    variant_flags: dict[str, bool] = Field(default_factory=dict)
+    variant_label: str = ""
+    raw_tokens: List[str] = Field(default_factory=list)
     has_subtitle: bool = False
 
 
@@ -66,12 +76,24 @@ async def parse_filename(request: ParseFilenameRequest) -> ParseFilenameResponse
     parsed_count = 0
 
     for filename in request.filenames:
-        number = extract_number(filename)
-        has_subtitle = check_subtitle(filename)
+        identity = parse_media_identity(filename)
+        number = identity.canonical_number
+        variant_flags = identity.to_dict()["variant_flags"]
+        has_subtitle = bool(variant_flags.get("subtitle_cn"))
 
         results.append(ParsedFile(
             filename=filename,
             number=number,
+            canonical_number=identity.canonical_number,
+            search_number=identity.search_number,
+            display_number=identity.display_number,
+            work_key=identity.work_key,
+            number_aliases=identity.number_aliases,
+            source_queries=identity.source_queries,
+            part_index=identity.part_index,
+            variant_flags=variant_flags,
+            variant_label=identity.variant_label,
+            raw_tokens=identity.raw_tokens,
             has_subtitle=has_subtitle
         ))
 

@@ -979,6 +979,32 @@ class TestImageProxy:
         response = client.get(f"/api/gallery/image?path={str(img)}")
         assert response.status_code == 200, "白名單內圖片應回傳 200"
 
+    def test_image_in_centralized_sidecar_root_200(self, client, tmp_path, monkeypatch):
+        """集中 sidecar 根目錄內的封面應允許瀏覽頁載入"""
+        media_dir = tmp_path / "gallery"
+        media_dir.mkdir()
+        metadata_dir = tmp_path / "Metadata"
+        cover_dir = metadata_dir / "Studio" / "ABC-123"
+        cover_dir.mkdir(parents=True)
+        img = cover_dir / "cover.jpg"
+        img.write_bytes(b'\xff\xd8\xff' + b'\x00' * 100)
+
+        def mock_load_config():
+            return {
+                "gallery": {
+                    "directories": [str(media_dir)],
+                    "path_mappings": {},
+                },
+                "sidecar": {
+                    "mode": "centralized",
+                    "root_dir": str(metadata_dir),
+                },
+            }
+        monkeypatch.setattr("web.routers.scanner.load_config", mock_load_config)
+
+        response = client.get(f"/api/gallery/image?path={str(img)}")
+        assert response.status_code == 200, "集中 sidecar 圖片應回傳 200"
+
     def test_image_outside_whitelist_403(self, client, tmp_path, monkeypatch):
         """白名單外的路徑回傳 403"""
         allowed_dir = tmp_path / "gallery"

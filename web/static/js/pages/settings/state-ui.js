@@ -55,6 +55,29 @@ export function stateUI() {
             }
         },
 
+        async selectSidecarRootFolder() {
+            if (typeof window.pywebview === 'undefined' || !window.pywebview.api) {
+                this.showToast(window.t('settings.toast.desktop_only'), 'info');
+                return;
+            }
+
+            try {
+                let folder = null;
+                if (window.pywebview.api.select_folder_path) {
+                    folder = await window.pywebview.api.select_folder_path();
+                } else {
+                    const result = await window.pywebview.api.select_folder();
+                    folder = result?.folder || null;
+                }
+                if (folder) {
+                    this.form.sidecarRootDir = folder;
+                    this.form.sidecarMode = 'centralized';
+                }
+            } catch (e) {
+                console.error('選擇 sidecar 根目錄失敗:', e);
+            }
+        },
+
         // Dirty check modal — 儲存更改後離開
         async dirtyCheckSave() {
             await this.saveConfig();

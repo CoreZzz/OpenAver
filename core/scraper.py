@@ -23,6 +23,7 @@ from core.scrapers import (
     Video, ScraperConfig, BaseScraper
 )
 from core.scrapers.utils import extract_number as _new_extract_number, FUZZY_SEARCH_SOURCES
+from core.filename_identity import build_source_queries, parse_media_identity
 from core.maker_mapping import get_maker_by_prefix
 from core.source_merger import merge_results
 from core.source_config import validate_source_id
@@ -74,6 +75,11 @@ def extract_number(filename: str) -> Optional[str]:
 
 def normalize_number(number: str) -> str:
     """標準化番號格式"""
+    from core.filename_identity import normalize_work_number
+
+    normalized = normalize_work_number(number)
+    if normalized:
+        return normalized
     return JavBusScraper().normalize_number(number)
 
 
@@ -205,6 +211,50 @@ def _dmm_proxy_url(proxy_url: str) -> str:
 VALID_JAVBUS_LANGS = {'zh-tw', 'ja', 'en'}
 
 
+def _search_query_options(raw_number: str, canonical_number: str) -> tuple:
+    """Return (identity, try_all_aliases, max_queries_per_source)."""
+    identity = parse_media_identity(raw_number)
+    if not identity.canonical_number:
+        identity = parse_media_identity(canonical_number)
+
+    try:
+        config = load_config()
+        search_cfg = config.get("search", {}) if isinstance(config, dict) else {}
+    except Exception as exc:
+        logger.error("[Search] 讀取搜尋策略設定失敗: %s", exc)
+        search_cfg = {}
+
+    try_all_aliases = bool(search_cfg.get("try_all_aliases", True))
+    try:
+        max_queries = int(search_cfg.get("max_queries_per_source", 3))
+    except (TypeError, ValueError):
+        max_queries = 3
+    max_queries = max(1, min(max_queries, 10))
+    return identity, try_all_aliases, max_queries
+
+
+def _queries_for_source(identity, source_id: str, canonical_number: str,
+                        try_all_aliases: bool, max_queries: int) -> list[str]:
+    if try_all_aliases and identity.canonical_number:
+        queries = build_source_queries(identity, source_id)
+    else:
+        queries = [canonical_number]
+    if not queries:
+        queries = [canonical_number]
+    return queries[:max_queries]
+
+
+def _search_scraper_with_queries(scraper, source_id: str, canonical_number: str,
+                                 identity, try_all_aliases: bool, max_queries: int):
+    for query in _queries_for_source(
+        identity, source_id, canonical_number, try_all_aliases, max_queries
+    ):
+        video = scraper.search(query)
+        if video:
+            return video
+    return None
+
+
 def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_lang: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     搜尋 JAV 資訊（向後相容函數）
@@ -212,7 +262,9 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
     all_data: Dict[str, Video] = {}
 
     # 標準化番號
+    raw_number = number
     number = normalize_number(number)
+    identity, try_all_aliases, max_queries = _search_query_options(raw_number, number)
 
     # 來源 id 驗證（TASK-61a-3）：改用 validate_source_id() 取代舊 VALID_SOURCES set。
     # 'auto' 與 8 個 builtin id 通過；其餘 → return None（保留「未知來源不 raise」契約）。
@@ -283,7 +335,9 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
                     try:
                         scraper_name = scraper.__class__.__name__
                         logger.debug(f"[Search] 嘗試 {scraper_name}...")
-                        v = scraper.search(number)
+                        v = _search_scraper_with_queries(
+                            scraper, sid, number, identity, try_all_aliases, max_queries
+                        )
                         if v:
                             results_by_source[v.source] = v
                             logger.debug(f"[Search] {scraper_name} 找到結果")
@@ -294,7 +348,21 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
         # metatube subset：bounded parallel
         if metatube_shims:
             with ThreadPoolExecutor(max_workers=min(len(metatube_shims), 5)) as ex:
-                futs = [(sid, ex.submit(shim.search, number)) for sid, shim in metatube_shims]
+                futs = [
+                    (
+                        sid,
+                        ex.submit(
+                            _search_scraper_with_queries,
+                            shim,
+                            sid,
+                            number,
+                            identity,
+                            try_all_aliases,
+                            max_queries,
+                        ),
+                    )
+                    for sid, shim in metatube_shims
+                ]
                 for sid, fut in futs:  # 按 user order 收（submit 順序 = user order；非 as_completed）
                     try:
                         v = fut.result()
@@ -320,7 +388,9 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
             try:
                 scraper_name = scraper.__class__.__name__
                 logger.debug(f"[Search] 嘗試 {scraper_name}...")
-                video = scraper.search(number)
+                video = _search_scraper_with_queries(
+                    scraper, source, number, identity, try_all_aliases, max_queries
+                )
                 if video:
                     all_data[video.source] = video
                     logger.debug(f"[Search] {scraper_name} 找到結果")

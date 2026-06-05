@@ -232,6 +232,49 @@ def _make_metadata(number: str = "SONE-205", title: str = "Test Title") -> dict:
     }
 
 
+def test_organize_file_writes_sidecars_to_centralized_path(tmp_path):
+    src_file = tmp_path / "ABC-123.mp4"
+    src_file.write_bytes(b"video")
+    sidecar_root = tmp_path / "Metadata"
+    config = {
+        "create_folder": False,
+        "filename_format": "{num}",
+        "max_title_length": 50,
+        "max_filename_length": 60,
+        "suffix_keywords": [],
+        "sidecar": {
+            "mode": "centralized",
+            "root_dir": str(sidecar_root),
+            "layout": "{maker}/{num}",
+            "nfo_filename": "{num}.nfo",
+            "cover_filename": "cover.jpg",
+            "poster_filename": "poster.jpg",
+            "fanart_filename": "fanart.jpg",
+            "extrafanart_dir": "extrafanart",
+        },
+    }
+    metadata = {
+        "number": "ABC-123",
+        "title": "Test Title",
+        "actors": [],
+        "tags": [],
+        "maker": "Studio",
+        "date": "2024-01-15",
+        "cover": "https://example.test/cover.jpg",
+        "url": "",
+    }
+
+    with patch("core.organizer.download_image", return_value=True) as mock_download:
+        result = organize_file(str(src_file), metadata, config)
+
+    base_dir = sidecar_root / "Studio" / "ABC-123"
+    assert result["success"] is True
+    assert Path(result["cover_path"]) == base_dir / "cover.jpg"
+    assert Path(result["nfo_path"]) == base_dir / "ABC-123.nfo"
+    assert (base_dir / "ABC-123.nfo").exists()
+    assert Path(mock_download.call_args.args[1]) == base_dir / "cover.jpg"
+
+
 class TestOrganizeDuplicateDetection:
     """organize_file() 覆蓋偵測測試"""
 

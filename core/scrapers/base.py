@@ -86,6 +86,12 @@ class BaseScraper(ABC):
             正規化後的番號
         """
         import re
+        from core.filename_identity import normalize_work_number
+
+        normalized = normalize_work_number(number)
+        if normalized:
+            return normalized
+
         number = number.strip()
         # 清理常見後綴（需有分隔符，避免誤刪 JUC-123 等合法前綴）
         number = re.sub(

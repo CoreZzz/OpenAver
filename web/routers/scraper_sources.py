@@ -18,7 +18,7 @@ from core.config import load_config
 from core.logger import get_logger
 from core.metatube.state import metatube_state
 from core.source_config import SourceConfig, render_name
-from core.source_settings import get_enabled_source_ids
+from core.source_settings import get_enabled_source_ids, get_search_source_mode
 
 logger = get_logger(__name__)
 
@@ -46,8 +46,9 @@ async def get_scraper_sources() -> dict:
     # 與 63c-1 routing factory 對齊（揭露的來源 == 實際可 fan-out 的來源）。builtin bypass gate。
     availability_map = metatube_state.availability_map()
 
-    ids = set(get_enabled_source_ids(availability_map))  # enabled + !manual_only + available gate
     config = load_config()
+    source_mode = get_search_source_mode(config)
+    ids = set(get_enabled_source_ids(availability_map))  # source_mode + manual_only/is_beta + available gate
 
     out: list[dict] = []
     for s in config.get("sources", []):
@@ -74,4 +75,4 @@ async def get_scraper_sources() -> dict:
         )
 
     out.sort(key=lambda x: x["order"])
-    return {"sources": out, "total_enabled": len(out)}
+    return {"sources": out, "total_enabled": len(out), "source_mode": source_mode}

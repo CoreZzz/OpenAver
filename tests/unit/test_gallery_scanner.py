@@ -110,7 +110,7 @@ class TestGalleryScanner:
         # 這時候 title 會直接用檔名
         filename = "Random Words FC2-PPV-1234567 And More.mp4"
         info = scanner.parse_filename(filename)
-        assert info.num == "FC2PPV-1234567"
+        assert info.num == "FC2-PPV-1234567"
         assert info.title == "Random Words FC2-PPV-1234567 And More"
         assert info.actor == ""
 
@@ -154,6 +154,54 @@ class TestGalleryScanner:
         # 資料夾裡沒圖片
         found = scanner.find_cover_image(str(video_path))
         assert found == ""
+
+    def test_scan_file_reads_centralized_sidecar_paths(self, tmp_path):
+        media_dir = tmp_path / "media"
+        media_dir.mkdir()
+        video_path = media_dir / "[ZZXX-618][SOD] Sample.mp4"
+        video_path.touch()
+
+        root = tmp_path / "Metadata"
+        base_dir = root / "SOD" / "ZZXX-618"
+        extrafanart_dir = base_dir / "extrafanart"
+        extrafanart_dir.mkdir(parents=True)
+        nfo_path = base_dir / "ZZXX-618.nfo"
+        cover_path = base_dir / "cover.jpg"
+        sample_path = extrafanart_dir / "fanart1.jpg"
+        nfo_path.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+            <movie>
+                <title>Centralized Sidecar Title</title>
+                <num>ZZXX-618</num>
+                <maker>SOD</maker>
+                <thumb>cover.jpg</thumb>
+            </movie>
+            """,
+            encoding="utf-8",
+        )
+        cover_path.touch()
+        sample_path.touch()
+
+        scanner = VideoScanner(sidecar_config={
+            "sidecar": {
+                "mode": "centralized",
+                "root_dir": str(root),
+                "layout": "{maker}/{num}",
+                "nfo_filename": "{num}.nfo",
+                "cover_filename": "cover.jpg",
+                "poster_filename": "poster.jpg",
+                "fanart_filename": "fanart.jpg",
+                "extrafanart_dir": "extrafanart",
+            }
+        })
+
+        info = scanner.scan_file(str(video_path))
+
+        assert info.title == "Centralized Sidecar Title"
+        assert info.num == "ZZXX-618"
+        assert info.maker == "SOD"
+        assert info.img == to_file_uri(str(cover_path))
+        assert info.sample_images == [to_file_uri(str(sample_path))]
 
 
 # ============ NUM_PATTERNS 多字母後綴 ============

@@ -150,6 +150,22 @@ class TestLocalStatusAPI:
         assert data["FC2-PPV-1234567"]["exists"] is True
         assert data["FC2-PPV-1234567"]["count"] == 1
 
+    def test_variant_number_uses_canonical_work_key(self, client, populated_db, monkeypatch):
+        """Phase 5：查詢變體番號時按 canonical work key 聚合本地狀態"""
+        def mock_get_db_path():
+            return populated_db
+        monkeypatch.setattr("web.routers.search.get_db_path", mock_get_db_path)
+
+        response = client.get("/api/search/local-status?numbers=SONE-205-C,FC2PPV-1234567")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["SONE-205-C"]["exists"] is True
+        assert data["SONE-205-C"]["canonical_number"] == "SONE-205"
+        assert data["SONE-205-C"]["count"] == 2
+        assert data["FC2PPV-1234567"]["exists"] is True
+        assert data["FC2PPV-1234567"]["canonical_number"] == "FC2-PPV-1234567"
+
     def test_same_number_multiple_files(self, client, populated_db, monkeypatch):
         """測試同番號多檔案正確計數"""
         def mock_get_db_path():

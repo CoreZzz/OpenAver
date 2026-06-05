@@ -118,6 +118,12 @@ class TestNeedsUpdateNewFields:
         assert need is False
         assert missing == []
 
+    def test_filename_placeholder_title_is_missing(self):
+        info = make_base_info(num='AVOP-460', title='AVOP-460-1')
+        need, missing = needs_update(info, has_nfo=True)
+        assert need is True
+        assert 'title' in missing
+
 
 
 # ============================================================
@@ -249,6 +255,22 @@ class TestUpdateNfoFileNewFields:
         assert root.find('set/name').text == '新シリーズ'
         assert root.find('label') is not None
         assert root.find('label').text == '新label'
+
+    def test_placeholder_title_is_replaced(self, tmp_path):
+        nfo_xml = self._minimal_nfo(title='AVOP-460-1').replace(
+            '<num>TEST-001</num>',
+            '<num>AVOP-460</num>',
+        )
+        nfo_path = write_nfo(tmp_path, nfo_xml)
+        info = make_base_info(num='AVOP-460', title='AVOP-460-1')
+        metadata = {'title': 'Scraped Title'}
+
+        updated, msg = update_nfo_file(nfo_path, metadata, info)
+
+        assert updated is True
+        root = ET.parse(nfo_path).getroot()
+        assert root.find('title').text == 'Scraped Title'
+        assert root.find('originaltitle') is None
 
     # 9. 已有 director 的 NFO + metadata 有 director → 不覆蓋
     def test_existing_director_not_overwritten(self, tmp_path):
