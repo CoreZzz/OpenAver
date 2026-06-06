@@ -390,6 +390,7 @@ class TestMigrationSourceLinks:
         assert sl["javbus"] is False
         assert sl["jav321"] is False
         assert sl["javdb"] is False
+        assert sl["missav"] is False
         assert sl["avsox"] is False
 
     def test_existing_source_links_preserved(self, tmp_path, monkeypatch):
@@ -404,6 +405,7 @@ class TestMigrationSourceLinks:
                 "javbus": False,
                 "jav321": False,
                 "javdb": True,   # user override
+                "missav": False,
                 "avsox": False,
             }
         })
@@ -431,6 +433,7 @@ class TestMigrationSourceLinks:
         assert sl["javbus"] is False      # filled from defaults
         assert sl["jav321"] is False      # filled from defaults
         assert sl["javdb"] is False       # filled from defaults
+        assert sl["missav"] is False      # filled from defaults
         assert sl["avsox"] is False       # filled from defaults
 
     def test_non_dict_source_links_replaced(self, tmp_path, monkeypatch):
@@ -446,6 +449,7 @@ class TestMigrationSourceLinks:
         assert isinstance(sl, dict)
         assert sl["dmm"] is True
         assert sl["javdb"] is False
+        assert sl["missav"] is False
 
 
 # ============ test_migration_primary_source ============
@@ -682,7 +686,7 @@ class TestMigrationSources:
     def _enabled_map(self, sources: list) -> dict:
         return {s["id"]: s["enabled"] for s in sources}
 
-    def test_fresh_config_gets_8_builtin_all_enabled(self, tmp_path, monkeypatch):
+    def test_fresh_config_gets_builtin_sources_with_theporndb_opt_in(self, tmp_path, monkeypatch):
         """config.json 無 sources key → load_config() 後補入 8 個 builtin 全 enabled=true"""
         config_path = tmp_path / "config.json"
         _write_config(config_path, {"general": {"theme": "light"}})
@@ -693,10 +697,16 @@ class TestMigrationSources:
 
         sources = result["sources"]
         assert isinstance(sources, list)
-        assert len(sources) == 8
-        assert all(s["enabled"] is True for s in sources)
+        assert len(sources) == 10
         ids = [s["id"] for s in sources]
-        assert ids == ["dmm", "javbus", "jav321", "javdb", "d2pass", "heyzo", "fc2", "avsox"]
+        assert ids == [
+            "dmm", "javbus", "jav321", "javdb", "missav",
+            "d2pass", "heyzo", "fc2", "avsox", "theporndb",
+        ]
+        emap = self._enabled_map(sources)
+        assert emap["theporndb"] is False
+        assert all(enabled is True for sid, enabled in emap.items() if sid != "theporndb")
+        assert next(s for s in sources if s["id"] == "theporndb")["config"] == {"api_token": ""}
 
     def test_upgrade_preserves_existing_keys(self, tmp_path, monkeypatch):
         """既有完整 config 但無 sources → 補 8 builtin 且所有既有 key/value 字面保留"""
@@ -720,7 +730,7 @@ class TestMigrationSources:
             },
             "source_links": {
                 "dmm": True, "d2pass": True, "heyzo": True, "fc2": True,
-                "javbus": False, "jav321": False, "javdb": False, "avsox": False,
+                "javbus": False, "jav321": False, "javdb": False, "missav": False, "avsox": False,
             },
             "general": {"theme": "dark", "locale": "ja"},
         })
@@ -730,8 +740,10 @@ class TestMigrationSources:
         result = load_config()
 
         # sources 補齊
-        assert len(result["sources"]) == 8
-        assert all(s["enabled"] is True for s in result["sources"])
+        assert len(result["sources"]) == 10
+        emap = self._enabled_map(result["sources"])
+        assert emap["theporndb"] is False
+        assert all(enabled is True for sid, enabled in emap.items() if sid != "theporndb")
         # 既有 key 字面保留
         assert result["general"]["theme"] == "dark"
         assert result["general"]["locale"] == "ja"
@@ -740,9 +752,10 @@ class TestMigrationSources:
         # source_links 的 False 值不被改動
         assert result["source_links"]["javbus"] is False
         assert result["source_links"]["javdb"] is False
+        assert result["source_links"]["missav"] is False
         assert result["source_links"]["dmm"] is True
 
-    def test_idempotent_valid_sources_unchanged(self, tmp_path, monkeypatch):
+    def test_valid_sources_append_new_opt_in_builtin(self, tmp_path, monkeypatch):
         """已存在合法 sources（javbus disabled）→ 不重生、不覆寫"""
         config_path = tmp_path / "config.json"
         existing = [
@@ -756,10 +769,13 @@ class TestMigrationSources:
 
         result = load_config()
 
-        assert len(result["sources"]) == 3
+        assert len(result["sources"]) == 10
         emap = self._enabled_map(result["sources"])
         assert emap["javbus"] is False
         assert emap["dmm"] is True
+        assert emap["missav"] is True
+        assert emap["theporndb"] is False
+        assert result["sources"][-1]["id"] == "theporndb"
 
     def test_uncensored_mode_conversion_disables_censored(self, tmp_path, monkeypatch):
         """uncensored_mode_enabled=true 升級無 sources → 4 有碼 disabled，4 無碼（含 d2pass）enabled"""
@@ -778,11 +794,13 @@ class TestMigrationSources:
         assert emap["javbus"] is False
         assert emap["jav321"] is False
         assert emap["javdb"] is False
+        assert emap["missav"] is False
         # 4 無碼 enabled（d2pass 顯式斷言：是無碼不是有碼）
         assert emap["d2pass"] is True
         assert emap["heyzo"] is True
         assert emap["fc2"] is True
         assert emap["avsox"] is True
+        assert emap["theporndb"] is False
 
     def test_uncensored_mode_does_not_convert_existing_sources(self, tmp_path, monkeypatch):
         """uncensored_mode_enabled=true 但 sources 段已存在 → 冪等優先，不觸發轉換"""
@@ -799,8 +817,11 @@ class TestMigrationSources:
 
         result = load_config()
 
-        assert len(result["sources"]) == 1
+        assert len(result["sources"]) == 10
         assert result["sources"][0]["enabled"] is True
+        emap = self._enabled_map(result["sources"])
+        assert emap["missav"] is True
+        assert emap["theporndb"] is False
 
     def test_corrupt_sources_string_fallback(self, tmp_path, monkeypatch):
         """sources 是字串（損壞）→ fallback 8 builtin 全 enabled + sources_bak 持有原值"""
@@ -812,8 +833,10 @@ class TestMigrationSources:
         result = load_config()
 
         assert isinstance(result["sources"], list)
-        assert len(result["sources"]) == 8
-        assert all(s["enabled"] is True for s in result["sources"])
+        assert len(result["sources"]) == 10
+        emap = self._enabled_map(result["sources"])
+        assert emap["theporndb"] is False
+        assert all(enabled is True for sid, enabled in emap.items() if sid != "theporndb")
         assert result["sources_bak"] == "broken"
 
     def test_corrupt_sources_missing_id_fallback(self, tmp_path, monkeypatch, caplog):
@@ -828,8 +851,10 @@ class TestMigrationSources:
         with caplog.at_level(logging.WARNING):
             result = load_config()
 
-        assert len(result["sources"]) == 8
-        assert all(s["enabled"] is True for s in result["sources"])
+        assert len(result["sources"]) == 10
+        emap = self._enabled_map(result["sources"])
+        assert emap["theporndb"] is False
+        assert all(enabled is True for sid, enabled in emap.items() if sid != "theporndb")
         assert result["sources_bak"] == bad
 
     def test_corrupt_then_valid_keeps_first_bak(self, tmp_path, monkeypatch):
@@ -844,7 +869,7 @@ class TestMigrationSources:
         # config.json 已被 save_config 寫回合法 sources + sources_bak
 
         second = load_config()
-        assert len(second["sources"]) == 8
+        assert len(second["sources"]) == 10
         assert second["sources_bak"] == "broken"  # 不被合法 sources 清掉
 
 
@@ -861,7 +886,7 @@ class TestConfigDefaultSchemaParity:
     """
 
     DEFAULT_PATH = Path(__file__).resolve().parents[2] / "web" / "config.default.json"
-    CENSORED = {"dmm", "javbus", "jav321", "javdb"}
+    CENSORED = {"dmm", "javbus", "jav321", "javdb", "missav"}
 
     def _default(self) -> dict:
         return json.loads(self.DEFAULT_PATH.read_text(encoding="utf-8"))

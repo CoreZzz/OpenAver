@@ -14,6 +14,7 @@ TARGET_FILES = [
     "core/scrapers/jav321.py",
     "core/scrapers/javbus.py",
     "core/scrapers/javdb.py",
+    "core/scrapers/missav.py",
     "core/scrapers/heyzo.py",
     "core/scrapers/d2pass.py",
 ]

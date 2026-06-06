@@ -578,7 +578,7 @@ _TOOLS: list[dict] = [
     },
     {
         "name": "proxy_image",
-        "description": "代理下載遠端圖片 — 解決 Cloudflare / 防盜鏈問題。搜尋結果的 cover 和 sample_images URL 是遠端直連，AI agent 直接 curl 會被擋。必須透過此端點下載。URL 必須屬於 SSRF 白名單域名（scraper 圖片來源 javbus / dmm / javdb / jav321 等，以及女優圖片 cdn.jsdelivr.net / upload.wikimedia.org / graphis.ne.jp / minnano-av.com），scheme 須為 https。非白名單 host 一律回 403。",
+        "description": "代理下載遠端圖片 — 解決 Cloudflare / 防盜鏈問題。搜尋結果的 cover 和 sample_images URL 是遠端直連，AI agent 直接 curl 會被擋。必須透過此端點下載。URL 必須屬於 SSRF 白名單域名（scraper 圖片來源 javbus / dmm / javdb / jav321 / theporndb 等，以及女優圖片 cdn.jsdelivr.net / jdbstatic.com / upload.wikimedia.org / graphis.ne.jp / minnano-av.com），scheme 須為 https。非白名單 host 一律回 403。",
         "method": "GET",
         "path": "/api/proxy-image",
         "input_schema": {
@@ -952,7 +952,7 @@ _TOOLS: list[dict] = [
         "name": "list_actress_photo_candidates",
         "description": (
             "串流回傳女優候選照片列表（SSE）。"
-            "從 4 個雲端來源（graphis/gfriends/wiki/minnano）並行抓取，"
+            "從 5 個雲端來源（gfriends/javdb/graphis/wiki/minnano）並行抓取，"
             "加上本機影片封面 crop，最多 6 張。"
             "每張照片準備好立即 push，前端即時展示。不修改資料庫。"
         ),
@@ -979,7 +979,7 @@ _TOOLS: list[dict] = [
     {
         "name": "set_actress_photo",
         "description": (
-            "替換女優本機照片。接受雲端 URL（graphis/gfriends/wiki/minnano）或本機影片封面 crop（local_crop）。"
+            "替換女優本機照片。接受雲端 URL（gfriends/javdb/graphis/wiki/minnano）或本機影片封面 crop（local_crop）。"
             "⚠️ side effect：覆蓋本機照片檔案（先 glob 刪除舊副檔名再寫入新圖）。"
             "可逆 — 隨時可再換；但舊檔案無備份。"
             "執行前必須先確認用戶選擇的來源與 URL。"
@@ -992,7 +992,7 @@ _TOOLS: list[dict] = [
                 "name": {"type": "string", "description": "女優名稱（URL path parameter，需 URL encode）"},
                 "source": {
                     "type": "string",
-                    "enum": ["graphis", "gfriends", "wiki", "minnano", "local_crop"],
+                    "enum": ["gfriends", "javdb", "graphis", "wiki", "minnano", "local_crop"],
                     "description": "照片來源識別碼",
                 },
                 "url": {"type": "string", "description": "雲端照片 URL（source 為雲端來源時必填）"},
@@ -1257,7 +1257,7 @@ _TOOLS: list[dict] = [
             "required": [],
         },
         "output_schema": {
-            "sources": "array — 每筆 {id: string, display_name: string, type: string, enabled: boolean, order: integer, is_censored: boolean}，依 order 升冪",
+            "sources": "array — 每筆 {id: string, display_name: string, type: string, enabled: boolean, order: integer, is_censored: boolean, manual_only: boolean, requires_proxy: boolean}，依 order 升冪；不包含來源 config/token",
             "total_enabled": "integer — 已揭露（實際會 fan-out）的來源數；source_mode=all/custom 時可能包含 enabled=false 的來源",
             "source_mode": "string — 目前搜尋來源策略：enabled/censored/uncensored/all/custom",
         },

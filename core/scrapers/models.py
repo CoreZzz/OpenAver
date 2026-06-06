@@ -21,13 +21,15 @@ class Video(BaseModel):
     maker: str = Field(default="", description="片商名稱")
     cover_url: str = Field(default="", description="封面圖片 URL")
     tags: list[str] = Field(default_factory=list, description="標籤/類別")
-    source: str = Field(default="", description="資料來源 (javbus/jav321/javdb)")
+    source: str = Field(default="", description="資料來源 (javbus/jav321/javdb/missav)")
     detail_url: str = Field(default="", description="詳情頁 URL")
     director: str = Field(default="", description="導演")
     duration: Optional[int] = Field(default=None, description="片長（分鐘）")
     label: str = Field(default="", description="發行商/レーベル")
     series: str = Field(default="", description="系列/シリーズ")
     sample_images: list[str] = Field(default_factory=list, description="樣品圖像 URL")
+    actress_aliases: dict[str, list[str]] = Field(default_factory=dict, description="Internal actress alias map")
+    actress_profiles: list[dict[str, object]] = Field(default_factory=list, description="Internal actress profile data")
 
     # 選用欄位（Task 5 會加入）
     rating: Optional[float] = None

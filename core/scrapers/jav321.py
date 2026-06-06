@@ -7,9 +7,10 @@ from core.logger import get_logger
 logger = get_logger(__name__)
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
+from core.maker_mapping import load_prefix_mapping, normalize_maker_name
 from .base import BaseScraper
 from .models import Video, Actress
-from .utils import get_html, post_html, rate_limit
+from .utils import get_html, post_html, rate_limit, strip_number_prefix
 
 
 def _force_https(url: str) -> str:
@@ -28,6 +29,94 @@ def _find_next_a_before_next_b(b_tag):
         if getattr(sib, 'name', None) == 'a':
             return sib
     return None
+
+
+def _text_after_b_before_next_b(b_tag) -> str:
+    parts: list[str] = []
+    for sib in b_tag.next_siblings:
+        if getattr(sib, 'name', None) == 'b':
+            break
+        if getattr(sib, 'name', None) == 'br':
+            continue
+        if hasattr(sib, 'get_text'):
+            text = sib.get_text(' ', strip=True)
+        else:
+            text = str(sib)
+        text = text.strip()
+        if text:
+            parts.append(text)
+    return re.sub(r'^[\s:：]+', '', ' '.join(parts)).strip()
+
+
+def _field_text(col9, label_name: str) -> str:
+    if not col9:
+        return ''
+    for b_tag in col9.find_all('b'):
+        if b_tag.get_text(strip=True) == label_name:
+            return _text_after_b_before_next_b(b_tag)
+    return ''
+
+
+def _heading_title_text(title_elem) -> str:
+    if not title_elem:
+        return ''
+    soup = BeautifulSoup(str(title_elem), 'html.parser')
+    for small in soup.select('small'):
+        small.decompose()
+    return soup.get_text(' ', strip=True)
+
+
+def _identity_key(value: str) -> str:
+    """Return a loose comparison key for JAV numbers and maker names."""
+    return re.sub(r'[^A-Z0-9]+', '', str(value or '').upper())
+
+
+_COMPACT_DISTINCT_PREFIXES = {'RED'}
+
+
+def _number_identity_key(value: str) -> str:
+    text = str(value or '').strip().upper()
+    match = re.fullmatch(r'([A-Z]{2,7})([-_]?)(\d{2,5})', text)
+    if match and match.group(1) in _COMPACT_DISTINCT_PREFIXES:
+        separator = 'COMPACT' if not match.group(2) else 'SEPARATED'
+        return f"{separator}:{match.group(1)}{match.group(2)}{match.group(3)}"
+    return _identity_key(text)
+
+
+def _find_number_in_text(text: str) -> str:
+    match = re.search(r'(?<![A-Z0-9])([A-Z]{1,10}[-_]?\d{1,6})(?![A-Z0-9])', str(text or ''), flags=re.IGNORECASE)
+    return match.group(1).upper() if match else ''
+
+
+def _heading_matches_number(title_elem, number: str) -> bool:
+    """JAV321 sometimes returns fuzzy detail pages; verify the displayed number."""
+    if not title_elem:
+        return False
+
+    candidates = [small.get_text(' ', strip=True) for small in title_elem.select('small')]
+    candidates.append(title_elem.get_text(' ', strip=True))
+
+    for text in candidates:
+        displayed_number = _find_number_in_text(text)
+        if displayed_number:
+            return _number_identity_key(displayed_number) == _number_identity_key(number)
+    return False
+
+
+def _maker_matches_prefix(number: str, maker: str) -> bool:
+    """Reject cross-maker collisions when a known prefix mapping exists."""
+    if not maker:
+        return True
+
+    match = re.match(r'^([A-Z]+)', str(number or ''), flags=re.IGNORECASE)
+    if not match:
+        return True
+
+    expected = load_prefix_mapping().get(match.group(1).upper(), '')
+    if not expected:
+        return True
+
+    return _identity_key(normalize_maker_name(maker)) == _identity_key(expected)
 
 
 class JAV321Scraper(BaseScraper):
@@ -86,12 +175,31 @@ class JAV321Scraper(BaseScraper):
 
             # 解析詳情頁
             soup = BeautifulSoup(detail_html, 'html.parser')
+            col9 = soup.select_one('.col-md-9')
 
-            # 標題
+            # 番號欄位是結構化證據；標題和 <small> 僅可作 fallback。
             title_elem = soup.select_one('h3')
-            title = title_elem.get_text(strip=True) if title_elem else ''
-            # 移除番號前綴
-            title = re.sub(rf'^{re.escape(number)}\s*', '', title, flags=re.IGNORECASE)
+            product_number = self.normalize_number(_field_text(col9, '品番'))
+            if product_number and _number_identity_key(product_number) != _number_identity_key(number):
+                logger.debug(
+                    "JAV321 detail rejected for %s: product number mismatch (%s)",
+                    number,
+                    product_number,
+                )
+                return None
+            if not product_number and not _heading_matches_number(title_elem, number):
+                raw_title = title_elem.get_text(separator=' ', strip=True) if title_elem else ''
+                logger.debug("JAV321 detail rejected for %s: heading mismatch (%s)", number, raw_title)
+                return None
+
+            display_number = product_number or number
+            title = _heading_title_text(title_elem)
+            title = strip_number_prefix(title, display_number)
+            if not title and title_elem:
+                title = title_elem.get_text(separator=' ', strip=True)
+            if not title:
+                logger.debug("JAV321 detail rejected for %s: heading mismatch (%s)", number, title)
+                return None
 
             # 封面（轉換成完整版）
             img_elem = soup.select_one('.col-md-3 img')
@@ -130,7 +238,6 @@ class JAV321Scraper(BaseScraper):
             duration: Optional[int] = None
             series = ''
 
-            col9 = soup.select_one('.col-md-9')
             if col9:
                 for b in col9.find_all('b'):
                     label = b.get_text(strip=True)
@@ -147,6 +254,10 @@ class JAV321Scraper(BaseScraper):
                     elif label == 'シリーズ':
                         a_tag = _find_next_a_before_next_b(b)
                         series = a_tag.get_text(strip=True) if a_tag else ''
+
+            if not _maker_matches_prefix(display_number, maker):
+                logger.debug("JAV321 detail rejected for %s: maker mismatch (%s)", number, maker)
+                return None
 
             # sample_images：跳過封面（href 結尾 /0）
             sample_images = []
@@ -166,7 +277,7 @@ class JAV321Scraper(BaseScraper):
                 return None
 
             video = Video(
-                number=number,
+                number=display_number,
                 title=title,
                 actresses=actresses,
                 date=date,

@@ -654,6 +654,7 @@ export function stateActress() {
                     this.showFavoriteActresses = false;
                     this.actressSearch = '';
                 }
+                this._setMetadataSearchContext(actressName, 'actress');
                 this.search = actressName;
                 this._animateFilter();
 

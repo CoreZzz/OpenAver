@@ -335,3 +335,82 @@ class TestFetchSamplesOnly:
         # 沒有任何 http:// / https:// 遠端 URL 寫入 DB
         assert not any(s.startswith("http://") or s.startswith("https://") for s in samples_arg), \
             f"[Codex P1] scraper URL 不得入庫: {samples_arg}"
+
+    def test_fetch_samples_only_uses_discovered_centralized_sidecar_dir(self, tmp_path):
+        """補劇照應跟 NFO/封面一樣復用既有 centralized sidecar 目錄。"""
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from core.database import Video, VideoRepository, init_db
+        from core.enricher import fetch_samples_only
+
+        db_path = tmp_path / "test.db"
+        init_db(db_path)
+        repo = VideoRepository(db_path)
+        video_path = tmp_path / "media" / "ABC-123.mp4"
+        video_path.parent.mkdir()
+        video_path.write_bytes(b"video")
+        path_uri = to_file_uri(str(video_path))
+
+        sidecar_root = tmp_path / "Metadata"
+        existing_sidecar_dir = sidecar_root / "Studio" / "ABC-123"
+        existing_sidecar_dir.mkdir(parents=True)
+        (existing_sidecar_dir / "ABC-123.nfo").write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+<movie>
+  <title>Existing Title</title>
+  <studio>Studio</studio>
+  <num>ABC-123</num>
+</movie>
+""",
+            encoding="utf-8",
+        )
+        repo.upsert(Video(
+            path=path_uri,
+            number="ABC-123",
+            title="Existing Title",
+            maker="Studio",
+        ))
+
+        config = {
+            "sidecar": {
+                "mode": "centralized",
+                "root_dir": str(sidecar_root),
+                "layout": "{maker}/{num}",
+                "nfo_filename": "{num}.nfo",
+                "cover_filename": "cover.jpg",
+                "extrafanart_dir": "samples",
+            }
+        }
+        search_result = {
+            "number": "ABC-123",
+            "title": "Scraper Title",
+            "actors": [],
+            "maker": "Scraper Studio",
+            "sample_images": ["https://example.test/1.jpg"],
+            "source": "javbus",
+        }
+
+        def fake_download(_url, dest):
+            Path(dest).parent.mkdir(parents=True, exist_ok=True)
+            Path(dest).write_bytes(b"image")
+            return True
+
+        with patch("core.enricher.VideoRepository", return_value=repo), \
+             patch("core.enricher.search_jav", return_value=search_result), \
+             patch("core.enricher.download_image", side_effect=fake_download):
+            result = fetch_samples_only(
+                file_path=path_uri,
+                number="ABC-123",
+                sidecar_config=config,
+            )
+
+        expected_sample = existing_sidecar_dir / "samples" / "fanart1.jpg"
+        wrong_sample = sidecar_root / "Scraper Studio" / "ABC-123" / "samples" / "fanart1.jpg"
+        fetched = repo.get_by_path(path_uri)
+
+        assert result.success is True
+        assert result.extrafanart_written == 1
+        assert expected_sample.exists()
+        assert not wrong_sample.exists()
+        assert fetched.sample_images == [to_file_uri(str(expected_sample))]

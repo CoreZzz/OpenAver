@@ -55,6 +55,20 @@ NO_GALLERY_HTML = """\
 </body></html>
 """
 
+EXPIRED_MAIN_WITH_STORAGE_SAMPLE_HTML = """\
+<html><body>
+<h1>FC2-1723984</h1>
+<h1>テストタイトル</h1>
+<div class="col-8">テスト賣家</div>
+<a data-fancybox="gallery" href="https://storage14000.contents.fc2.com/file/349/34883644/1570439183.78.jpg">
+  <img src="https://storage15000.contents.fc2.com/file/349/34883644/1570438816.99.jpg">
+</a>
+<p class="card-text">
+  <a href="/tag/amateur">アマチュア</a>
+</p>
+</body></html>
+"""
+
 
 # ============================================================
 # Helpers
@@ -107,6 +121,21 @@ class TestFullFields:
         assert video is not None
         for url in video.sample_images:
             assert url.startswith("https://")
+
+    def test_seller_is_not_used_as_actress(self, scraper):
+        video = run_search(scraper, FULL_FIELDS_HTML)
+        assert video is not None
+        assert video.maker
+        assert video.actresses == []
+
+    def test_fc2_storage_sample_is_used_as_downloadable_cover(self, scraper):
+        video = run_search(scraper, EXPIRED_MAIN_WITH_STORAGE_SAMPLE_HTML)
+        assert video is not None
+        assert video.cover_url == (
+            "https://contents-thumbnail2.fc2.com/w1000/"
+            "storage15000.contents.fc2.com/file/349/34883644/1570438816.99.jpg"
+        )
+        assert video.sample_images == [video.cover_url]
 
 
 class TestNoGallery:

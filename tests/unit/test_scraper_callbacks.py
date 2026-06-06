@@ -226,6 +226,7 @@ class TestSearchActressResultCallback:
         mock_scraper = make_mock_scraper_actress([ids])
 
         with patch('core.scraper.JavBusScraper', return_value=mock_scraper), \
+             patch('core.scraper.get_all_source_ids_ordered', return_value=['javbus']), \
              patch('core.scraper.search_jav', side_effect=make_mock_search_jav(results_map)):
             results = search_actress('三上悠亜', limit=20)
             assert isinstance(results, list)
@@ -249,6 +250,7 @@ class TestSearchActressResultCallback:
 
         # limit=3 ensures target_ids is exactly ids (no extra page fetching)
         with patch('core.scraper.JavBusScraper', return_value=mock_scraper), \
+             patch('core.scraper.get_all_source_ids_ordered', return_value=['javbus']), \
              patch('core.scraper.search_jav', side_effect=make_mock_search_jav(results_map)):
             search_actress('三上悠亜', limit=3, result_callback=result_callback)
 
@@ -278,6 +280,7 @@ class TestSearchActressResultCallback:
 
         # limit=3 ensures target_ids is exactly 3 items (no extra page fetching)
         with patch('core.scraper.JavBusScraper', return_value=mock_scraper), \
+             patch('core.scraper.get_all_source_ids_ordered', return_value=['javbus']), \
              patch('core.scraper.search_jav', side_effect=make_mock_search_jav(results_map)):
             search_actress('三上悠亜', limit=3, result_callback=result_callback)
 
@@ -620,6 +623,23 @@ class TestRule4bVariantProbeGating:
     JavBus 停用 → 跳過 variant 探查 + 不發 ('javbus','searching') status（靜默降級），
     落一般 search_jav。JavBus 啟用 → variant 探查照舊。
     """
+
+    def test_javdb_hit_skips_variant_probe(self):
+        """JavDB exact hit is authoritative and should short-circuit JavBus variants."""
+        from core.scraper import smart_search
+
+        mock_variant = MagicMock(return_value=['SONE-100-variant'])
+        javdb_result = {'number': 'SONE-100', 'title': 'JavDB Title', '_source': 'javdb'}
+
+        with patch('core.scraper.is_number_format', return_value=True), \
+             patch('core.scraper.normalize_number', return_value='SONE-100'), \
+             patch('core.scraper._try_javdb_first', return_value=javdb_result), \
+             patch('core.scraper.get_all_variant_ids', mock_variant):
+            results = smart_search('SONE-100')
+
+        mock_variant.assert_not_called()
+        assert len(results) == 1
+        assert results[0]['_source'] == 'javdb'
 
     def test_javbus_disabled_skips_variant_probe(self, make_mock_search_jav):
         """JavBus 不在 Active Row → get_all_variant_ids 不被呼叫，無 javbus status，落一般 search_jav"""

@@ -71,6 +71,8 @@ async def get_scraper_sources() -> dict:
                 "enabled": sc.enabled,
                 "order": sc.order,
                 "is_censored": sc.is_censored,
+                "manual_only": sc.manual_only,
+                "requires_proxy": sc.requires_proxy,
             }
         )
 

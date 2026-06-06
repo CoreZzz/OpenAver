@@ -108,6 +108,38 @@ def _video_group_sort_key(item: tuple) -> tuple:
     return (_part_sort_key(identity.part_index), str(v.path or ""))
 
 
+def _video_metadata_score(v, identity: MediaIdentity) -> int:
+    score = 0
+    title = _display_title_for(v, identity)
+    if title and title != _display_number_for(v, identity):
+        score += 2
+    for value in (
+        v.original_title,
+        v.actresses,
+        v.maker,
+        v.release_date,
+        v.tags,
+        v.director,
+        v.duration,
+        v.series,
+        v.label,
+        v.sample_images,
+    ):
+        if value:
+            score += 1
+    return score
+
+
+def _work_primary_sort_key(item: tuple) -> tuple:
+    v, identity = item
+    return (
+        0 if v.cover_path else 1,
+        0 if (v.nfo_mtime or 0) > 0 else 1,
+        -_video_metadata_score(v, identity),
+        _video_group_sort_key(item),
+    )
+
+
 def _serialize_work_file(
     v,
     identity: MediaIdentity,
@@ -127,7 +159,17 @@ def _serialize_work_file(
         "variant_label": identity.variant_label,
         "size": v.size_bytes,
         "mtime": int(v.mtime) if v.mtime else 0,
+        "_cover_path": v.cover_path or "",
+        "_has_cover": bool(v.cover_path),
+        "_has_nfo": (v.nfo_mtime or 0) > 0,
     }
+
+
+def _public_work_files(files: list[dict]) -> list[dict]:
+    return [
+        {key: value for key, value in file.items() if not str(key).startswith("_")}
+        for file in files
+    ]
 
 
 def _group_videos_by_work(videos: list, video_labels: dict[str, str] | None = None) -> list[tuple]:
@@ -140,7 +182,7 @@ def _group_videos_by_work(videos: list, video_labels: dict[str, str] | None = No
     grouped = []
     for items in groups.values():
         ordered = sorted(items, key=_video_group_sort_key)
-        primary_video, primary_identity = ordered[0]
+        primary_video, primary_identity = sorted(items, key=_work_primary_sort_key)[0]
         files = [
             _serialize_work_file(
                 video,
@@ -164,9 +206,16 @@ def _serialize_video(
     """將 Video ORM 物件序列化為前端 JSON dict（列表端點與單筆端點共用）"""
     identity = identity or _identity_for_video(v)
     work_size = sum(int(file.get("size") or 0) for file in files) if files else v.size_bytes
+    work_files = files or [_serialize_work_file(v, identity, directory_label)]
+    work_cover_path = v.cover_path or next(
+        (file.get("_cover_path") for file in work_files if file.get("_cover_path")),
+        "",
+    )
+    work_has_cover = bool(work_cover_path) or any(file.get("_has_cover") for file in work_files)
+    work_has_nfo = (v.nfo_mtime or 0) > 0 or any(file.get("_has_nfo") for file in work_files)
     cover_url = ""
-    if v.cover_path:
-        local_path = _gallery_image_param(v.cover_path)
+    if work_cover_path:
+        local_path = _gallery_image_param(work_cover_path)
         cover_url = f"/api/gallery/image?path={quote(local_path, safe='')}"
 
     sample_urls = []
@@ -193,8 +242,8 @@ def _serialize_video(
         "label": v.label or '',
         "sample_images": sample_urls,
         "user_tags": v.user_tags or [],              # list[str]，空時回空 list
-        "has_cover": bool(v.cover_path),             # DB 初判（不做 IO）
-        "has_nfo": (v.nfo_mtime or 0) > 0,
+        "has_cover": work_has_cover,
+        "has_nfo": work_has_nfo,
         "work_key": _work_key_for(v, identity),
         "part_index": identity.part_index,
         "variant_flags": {
@@ -202,8 +251,8 @@ def _serialize_video(
             "cracked": identity.variant_flags.cracked,
         },
         "variant_label": identity.variant_label,
-        "files": files or [_serialize_work_file(v, identity, directory_label)],
-        "file_count": len(files) if files else 1,
+        "files": _public_work_files(work_files),
+        "file_count": len(work_files),
     }
 
 

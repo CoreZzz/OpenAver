@@ -109,7 +109,7 @@ def render_name(s: SourceConfig) -> str:
 
 
 def get_builtin_sources() -> list[SourceConfig]:
-    """回傳 8 個內建來源，order 對齊 SOURCE_ORDER（dmm 開頭）。
+    """回傳內建來源，order 對齊 SOURCE_ORDER（dmm 開頭）。
 
     全部 type='builtin'、enabled=True、manual_only=False、is_beta=False。
     不含 'auto'（auto 是 mode 不是 source，CD-61-5）。
@@ -120,9 +120,9 @@ def get_builtin_sources() -> list[SourceConfig]:
             type='builtin',
             display_name_key=SOURCE_NAMES[sid],
             display_name_raw='',
-            enabled=True,
+            enabled=(sid != 'theporndb'),
             order=index,
-            config={},
+            config={'api_token': ''} if sid == 'theporndb' else {},
             is_beta=False,
             manual_only=False,
             requires_proxy=(sid in PROXY_SOURCES),
@@ -195,7 +195,7 @@ def validate_source_id(sid: str) -> bool:
     """驗證來源 id 是否合法（替代 core/scraper.py 的 VALID_SOURCES set）。
 
     - 'auto' → True（特判，CD-61-5；但 get_builtin_sources() 不含 auto）。
-    - 8 個 builtin id → True。
+    - builtin id → True。
     - 'metatube:*'（非空後綴）→ True（63c，CD-63c-1）。
     - 其他 → False。
     """

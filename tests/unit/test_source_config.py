@@ -45,7 +45,7 @@ def test_render_name_metatube_uses_display_name_raw():
 # get_builtin_sources
 # ---------------------------------------------------------------------------
 def test_get_builtin_sources_count():
-    assert len(get_builtin_sources()) == 8
+    assert len(get_builtin_sources()) == 10
 
 
 def test_get_builtin_sources_ids_match_source_order():
@@ -61,8 +61,10 @@ def test_get_builtin_sources_all_type_builtin():
     assert all(s.type == 'builtin' for s in get_builtin_sources())
 
 
-def test_get_builtin_sources_all_enabled():
-    assert all(s.enabled is True for s in get_builtin_sources())
+def test_get_builtin_sources_enabled_defaults():
+    by_id = {s.id: s for s in get_builtin_sources()}
+    assert by_id['theporndb'].enabled is False
+    assert all(s.enabled is True for sid, s in by_id.items() if sid != 'theporndb')
 
 
 def test_get_builtin_sources_all_not_beta():
@@ -71,7 +73,7 @@ def test_get_builtin_sources_all_not_beta():
 
 def test_get_builtin_sources_order_values():
     orders = [s.order for s in get_builtin_sources()]
-    assert orders == list(range(8))
+    assert orders == list(range(10))
 
 
 def test_get_builtin_sources_excludes_auto():
@@ -83,6 +85,17 @@ def test_get_builtin_sources_display_name_key_is_brand():
     by_id = {s.id: s for s in get_builtin_sources()}
     assert by_id['javbus'].display_name_key == 'JavBus'
     assert by_id['dmm'].display_name_key == 'DMM'
+    assert by_id['missav'].display_name_key == 'MissAV'
+    assert by_id['theporndb'].display_name_key == 'ThePornDB'
+
+
+def test_get_builtin_sources_theporndb_opt_in_config():
+    by_id = {s.id: s for s in get_builtin_sources()}
+    tpdb = by_id['theporndb']
+    assert tpdb.enabled is False
+    assert tpdb.is_censored is False
+    assert tpdb.requires_proxy is False
+    assert tpdb.config == {'api_token': ''}
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +139,11 @@ def test_is_censored_builtin_censored_javbus():
     assert s.is_censored is True
 
 
+def test_is_censored_builtin_censored_missav():
+    s = SourceConfig(id='missav', type='builtin', display_name_key='MissAV')
+    assert s.is_censored is True
+
+
 def test_is_censored_builtin_uncensored_fc2():
     s = SourceConfig(id='fc2', type='builtin', display_name_key='FC2')
     assert s.is_censored is False
@@ -133,6 +151,11 @@ def test_is_censored_builtin_uncensored_fc2():
 
 def test_is_censored_builtin_uncensored_d2pass():
     s = SourceConfig(id='d2pass', type='builtin', display_name_key='D2Pass')
+    assert s.is_censored is False
+
+
+def test_is_censored_builtin_uncensored_theporndb():
+    s = SourceConfig(id='theporndb', type='builtin', display_name_key='ThePornDB')
     assert s.is_censored is False
 
 
@@ -249,7 +272,7 @@ def test_requires_proxy_dmm_true():
 def test_requires_proxy_other_builtins_false():
     """get_builtin_sources() 中非 DMM builtin → requires_proxy is False"""
     by_id = {s.id: s for s in get_builtin_sources()}
-    for sid in ('javbus', 'jav321', 'javdb', 'd2pass', 'heyzo', 'fc2', 'avsox'):
+    for sid in ('javbus', 'jav321', 'javdb', 'missav', 'd2pass', 'heyzo', 'fc2', 'avsox', 'theporndb'):
         assert by_id[sid].requires_proxy is False, f"{sid} should have requires_proxy=False"
 
 

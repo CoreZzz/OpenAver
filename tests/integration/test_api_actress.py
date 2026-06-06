@@ -351,12 +351,14 @@ class TestPhotoCandidates:
         assert "done" in event_names
 
         candidates = [e for e in events if e["event"] == "candidate"]
-        # 雲端 mock 成功（gfriends 被過濾，因 photo_source=gfriends），最多 3 來源
-        assert len(candidates) <= 3
+        # 雲端 mock 成功，最多 5 來源
+        assert len(candidates) <= 5
         for c in candidates:
             assert "source" in c["data"]
             assert "thumb_url" in c["data"]
             assert "full_url" in c["data"]
+            assert c["data"]["thumb_url"].startswith("/api/proxy-image?url=")
+            assert c["data"]["full_url"].startswith("https://example.com/")
 
         # done event 含 total
         done_events = [e for e in events if e["event"] == "done"]
@@ -402,8 +404,8 @@ class TestPhotoCandidates:
         done_events = [e for e in events if e["event"] == "done"]
         assert done_events[0]["data"]["total"] == 0
 
-    def test_photo_candidates_photo_source_none_tries_all_four(self, client):
-        """photo_source=None（legacy）時 4 來源全部嘗試"""
+    def test_photo_candidates_photo_source_none_tries_all_cloud_sources(self, client):
+        """photo_source=None（legacy）時所有雲端來源全部嘗試"""
         # 先收藏，photo_source 設為 None
         with patch("web.routers.actress.get_cached_profile", return_value={**MOCK_PROFILE, "photo_source": None}), \
              patch("web.routers.actress.get_actress_profile"), \
@@ -421,11 +423,10 @@ class TestPhotoCandidates:
              patch("web.routers.actress._get_random_videos_with_covers", return_value=[]):
             client.get(f"/api/actresses/{ACTRESS_NAME}/photo-candidates")
 
-        # 4 來源全部嘗試
-        assert set(called_sources) == {"graphis", "gfriends", "wiki", "minnano"}
+        assert set(called_sources) == {"gfriends", "javdb", "graphis", "wiki", "minnano"}
 
-    def test_photo_candidates_excludes_current_source(self, client):
-        """photo_source='gfriends' 時 gfriends 不會被呼叫，剩 3 來源並行"""
+    def test_photo_candidates_includes_current_source(self, client):
+        """photo_source='gfriends' 時仍嘗試所有雲端來源"""
         self._save_actress(client)  # photo_source='gfriends'（MOCK_PROFILE 預設）
 
         called_sources = []
@@ -439,11 +440,63 @@ class TestPhotoCandidates:
             resp = client.get(f"/api/actresses/{ACTRESS_NAME}/photo-candidates")
 
         assert resp.status_code == 200
-        assert "gfriends" not in called_sources
-        assert set(called_sources) == {"graphis", "wiki", "minnano"}
+        assert set(called_sources) == {"gfriends", "javdb", "graphis", "wiki", "minnano"}
 
-    def test_photo_candidates_local_crop_tries_all_four(self, client):
-        """photo_source='local_crop' 時 4 雲端來源全試"""
+    def test_fetch_gfriends_uses_local_maker_hints(self, client, tmp_path):
+        """gfriends picker lookup uses maker hints inferred from local videos."""
+        from core.database import Video, VideoRepository
+        from web.routers import actress as actress_router
+
+        VideoRepository().upsert(Video(
+            path=str(tmp_path / "sone-001.mp4"),
+            number="SONE-001",
+            title="Test Video",
+            actresses=[ACTRESS_NAME],
+            maker="",
+        ))
+
+        expected_url = "https://cdn.jsdelivr.net/gh/gfriends/gfriends@master/Content/7-S1/test.jpg"
+        with patch("core.scrapers.actress.gfriends.lookup_gfriends", return_value=expected_url) as mock_lookup:
+            result = actress_router._fetch_single_source(ACTRESS_NAME, "gfriends")
+
+        assert result == expected_url
+        mock_lookup.assert_called_once()
+        assert "S1" in mock_lookup.call_args[0][1]
+
+    def test_fetch_cloud_source_tries_japanese_name_variant(self, client):
+        """Cloud sources retry a Japanese glyph variant, e.g. 三上悠亚 → 三上悠亜."""
+        from web.routers import actress as actress_router
+
+        wiki_result = {"photo_url": "https://upload.wikimedia.org/wikipedia/commons/mikami.jpg"}
+
+        def mock_wiki(name):
+            if name == "三上悠亜":
+                return wiki_result
+            return None
+
+        with patch("core.scrapers.actress.wiki_ja.scrape_wiki_ja", side_effect=mock_wiki):
+            result = actress_router._fetch_single_source("三上悠亚", "wiki")
+
+        assert result == wiki_result["photo_url"]
+
+    def test_fetch_javdb_tries_japanese_name_variant(self, client):
+        """JavDB photo lookup also retries Japanese glyph variants."""
+        from web.routers import actress as actress_router
+
+        expected_url = "https://c0.jdbstatic.com/actors/mikami-yua.jpg"
+
+        def mock_javdb(name):
+            if name == "三上悠亜":
+                return expected_url
+            return None
+
+        with patch("core.scrapers.javdb.scrape_javdb_actress_photo", side_effect=mock_javdb):
+            result = actress_router._fetch_single_source("三上悠亚", "javdb")
+
+        assert result == expected_url
+
+    def test_photo_candidates_local_crop_tries_all_cloud_sources(self, client):
+        """photo_source='local_crop' 時所有雲端來源全試"""
         self._save_actress_with_source(client, "local_crop")
 
         called_sources = []
@@ -456,7 +509,7 @@ class TestPhotoCandidates:
              patch("web.routers.actress._get_random_videos_with_covers", return_value=[]):
             client.get(f"/api/actresses/{ACTRESS_NAME}/photo-candidates")
 
-        assert set(called_sources) == {"graphis", "gfriends", "wiki", "minnano"}
+        assert set(called_sources) == {"gfriends", "javdb", "graphis", "wiki", "minnano"}
 
 
 # ---------------------------------------------------------------------------

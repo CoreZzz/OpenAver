@@ -3,12 +3,20 @@ enricher.py - 舊片原地補完（NFO / 封面 / 劇照），絕對不搬移、
 """
 
 import os
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
-from core.database import Video, VideoRepository, get_connection
+from core.database import (
+    Actress,
+    ActressRepository,
+    AliasRepository,
+    Video,
+    VideoRepository,
+    get_connection,
+)
 from core.logger import get_logger
 from core.nfo_updater import parse_nfo
 from core.organizer import download_image, find_subtitle_files, generate_nfo
@@ -16,12 +24,15 @@ from core.path_utils import to_file_uri, uri_to_fs_path
 from core.scraper import search_jav
 from core.sidecar_paths import resolve_sidecar_paths
 from core.title_placeholders import is_filename_placeholder_title
+from core.filename_identity import parse_media_identity
+from core.metadata_corrections import apply_metadata_overrides, sanitize_actor_names
 
 logger = get_logger(__name__)
 
 VALID_MODES = {"fill_missing", "db_to_sidecar", "refresh_full"}
 
 _FILL_MISSING_REQUIRED = ["title", "actresses", "maker", "director", "series", "label", "tags", "release_date"]
+_DATE_STYLE_NUMBER_RE = re.compile(r"^(\d{6})([-_])(\d{2,3})$")
 
 
 def _sidecar_meta(number: str, meta: dict) -> dict:
@@ -31,8 +42,133 @@ def _sidecar_meta(number: str, meta: dict) -> dict:
     return data
 
 
+def _search_query_from_path(path: str) -> str:
+    identity = parse_media_identity(path)
+    return identity.search_number or identity.canonical_number or identity.raw_stem.strip()
+
+
+def _date_style_compact_key(value: str) -> str:
+    identity = parse_media_identity(value)
+    number = identity.canonical_number or str(value or "").strip().upper()
+    match = _DATE_STYLE_NUMBER_RE.match(number)
+    if not match:
+        return ""
+    return f"{match.group(1)}{match.group(3)}"
+
+
+def _prefer_path_date_separator(number: str, fs_path: str) -> str:
+    path_identity = parse_media_identity(fs_path)
+    path_number = path_identity.canonical_number or ""
+    current_identity = parse_media_identity(number)
+    current_number = current_identity.canonical_number or str(number or "").strip()
+    if not path_number or path_number == current_number:
+        return str(number or "").strip()
+    if (
+        _DATE_STYLE_NUMBER_RE.match(path_number)
+        and _DATE_STYLE_NUMBER_RE.match(current_number)
+        and _date_style_compact_key(path_number) == _date_style_compact_key(current_number)
+    ):
+        return path_number
+    return str(number or "").strip()
+
+
 def _ensure_parent(path: str) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+
+def _is_remote_url(value: str) -> bool:
+    text = str(value or "").strip().lower()
+    return text.startswith("http://") or text.startswith("https://")
+
+
+def _sidecar_section(config: dict | None) -> dict:
+    if not isinstance(config, dict):
+        return {}
+    raw = config.get("sidecar") if "sidecar" in config else config
+    return raw if isinstance(raw, dict) else {}
+
+
+def _render_sidecar_name(template: str, number: str) -> str:
+    return (
+        str(template or "")
+        .replace("{num}", number)
+        .replace("{number}", number)
+        .strip()
+    )
+
+
+def _centralized_sidecar_cover_for_nfo(nfo_path: Path, sidecar: dict, number: str) -> str:
+    cover_names = [
+        _render_sidecar_name(str(sidecar.get("cover_filename") or "cover.jpg"), number),
+        _render_sidecar_name(str(sidecar.get("poster_filename") or "poster.jpg"), number),
+        _render_sidecar_name(str(sidecar.get("fanart_filename") or "fanart.jpg"), number),
+        "cover.jpg",
+        "poster.jpg",
+        "fanart.jpg",
+        f"{number}.jpg",
+    ]
+    for name in dict.fromkeys(name for name in cover_names if name):
+        candidate = nfo_path.parent / name
+        if candidate.is_file():
+            return str(candidate)
+    return ""
+
+
+def _discover_existing_centralized_sidecar(number: str, sidecar_config: dict | None) -> dict[str, str]:
+    sidecar = _sidecar_section(sidecar_config)
+    if sidecar.get("mode") != "centralized":
+        return {}
+
+    root_dir = str(sidecar.get("root_dir") or "").strip()
+    if not root_dir:
+        return {}
+
+    try:
+        root = Path(uri_to_fs_path(root_dir))
+    except Exception:
+        root = Path(root_dir)
+    if not root.is_dir():
+        return {}
+
+    number = str(number or "").strip()
+    if not number:
+        return {}
+
+    nfo_names = {
+        f"{number}.nfo",
+        _render_sidecar_name(str(sidecar.get("nfo_filename") or "{num}.nfo"), number),
+    }
+    nfo_names = {name for name in nfo_names if name}
+
+    nfo_paths: List[Path] = []
+    seen_paths: set[str] = set()
+    for name in sorted(nfo_names):
+        try:
+            matches = sorted(root.rglob(name), key=lambda p: str(p).lower())
+        except OSError as exc:
+            logger.warning("centralized sidecar discovery failed for %s: %s", number, exc)
+            return {}
+        for match in matches:
+            key = str(match).lower()
+            if key not in seen_paths:
+                seen_paths.add(key)
+                nfo_paths.append(match)
+
+    if not nfo_paths:
+        return {}
+
+    nfo_path = nfo_paths[0]
+    cover_path = ""
+    for candidate in nfo_paths:
+        candidate_cover = _centralized_sidecar_cover_for_nfo(candidate, sidecar, number)
+        if candidate_cover:
+            nfo_path = candidate
+            cover_path = candidate_cover
+            break
+    if not cover_path:
+        cover_path = _centralized_sidecar_cover_for_nfo(nfo_path, sidecar, number)
+
+    return {"nfo_path": str(nfo_path), "cover_path": cover_path}
 
 
 @dataclass
@@ -120,6 +256,8 @@ def _scraper_to_meta(data: dict) -> dict:
         # _ 前綴 carrier（search_jav 注入）在此去前綴轉 canonical key，流入 NFO writer。
         "summary": data.get("_summary", ""),
         "rating": data.get("_rating"),
+        "actress_aliases": data.get("_actress_aliases", {}),
+        "actress_profiles": data.get("_actress_profiles", []),
     }
 
 
@@ -160,7 +298,7 @@ def _merge_meta(base: dict, supplement: dict, number: str = "") -> tuple:
         if not merged.get(key) and supplement.get(key):
             merged[key] = supplement[key]
             filled.append(key)
-    if merged.get("cover_url") == "" and supplement.get("cover_url"):
+    if (not merged.get("cover_url") or not _is_remote_url(merged.get("cover_url", ""))) and supplement.get("cover_url"):
         merged["cover_url"] = supplement["cover_url"]
     if merged.get("sample_images") is None and supplement.get("sample_images"):
         merged["sample_images"] = supplement["sample_images"]
@@ -172,7 +310,39 @@ def _merge_meta(base: dict, supplement: dict, number: str = "") -> tuple:
         merged["summary"] = supplement["summary"]
     if merged.get("rating") is None and supplement.get("rating") is not None:
         merged["rating"] = supplement["rating"]
+    if supplement.get("actress_aliases"):
+        merged["actress_aliases"] = supplement["actress_aliases"]
+    if supplement.get("actress_profiles"):
+        merged["actress_profiles"] = supplement["actress_profiles"]
     return merged, filled
+
+
+def _first_video_by_number(repo: VideoRepository, number: str) -> Optional[Video]:
+    db_hits = repo.get_by_numbers([number])
+    videos = db_hits.get(number, [])
+    if not isinstance(videos, list):
+        return None
+    return videos[0] if videos else None
+
+
+def _get_video_by_path(repo: VideoRepository, path_uri: str) -> Optional[Video]:
+    video = repo.get_by_path(path_uri)
+    return video if isinstance(video, Video) else None
+
+
+def _choose_text(new_value, old_value: str = "", number: str = "", placeholder_sensitive: bool = False) -> str:
+    text = str(new_value or "").strip()
+    if text and not (placeholder_sensitive and is_filename_placeholder_title(text, number)):
+        return text
+    return str(old_value or "").strip()
+
+
+def _choose_list(new_value, old_value=None) -> List[str]:
+    if isinstance(new_value, list) and new_value:
+        return new_value
+    if isinstance(old_value, list):
+        return old_value
+    return []
 
 
 def _write_nfo(
@@ -229,6 +399,104 @@ def _write_nfo(
     return True
 
 
+def _sync_nfo_metadata_overrides(nfo_path: Path, meta: dict, fields: list[str]) -> bool:
+    if not nfo_path.exists():
+        return False
+
+    modified = False
+    try:
+        tree = ET.parse(nfo_path)
+        root = tree.getroot()
+
+        def set_text(tag: str, value: str) -> None:
+            nonlocal modified
+            text = str(value or "").strip()
+            if not text:
+                return
+            elem = root.find(tag)
+            if elem is None:
+                elem = ET.SubElement(root, tag)
+            if (elem.text or "").strip() != text:
+                elem.text = text
+                modified = True
+
+        def set_series_name(value: str) -> None:
+            nonlocal modified
+            text = str(value or "").strip()
+            if not text:
+                return
+            set_elem = root.find("set")
+            if set_elem is None:
+                set_elem = ET.SubElement(root, "set")
+            name_elem = set_elem.find("name")
+            if name_elem is None:
+                name_elem = ET.SubElement(set_elem, "name")
+            if (name_elem.text or "").strip() != text:
+                name_elem.text = text
+                modified = True
+
+        if "title" in fields:
+            set_text("title", meta.get("title", ""))
+
+        if "original_title" in fields:
+            set_text("originaltitle", meta.get("original_title", ""))
+
+        if any(field in fields for field in ("actors", "actresses")):
+            desired_actors = _list_strings(meta.get("actresses"))
+            current_actors = [
+                (name.text or "").strip()
+                for actor in root.findall("actor")
+                for name in [actor.find("name")]
+                if name is not None and name.text
+            ]
+            if current_actors != desired_actors:
+                actor_insert_at = len(root)
+                for idx, child in enumerate(list(root)):
+                    if child.tag in {"tag", "genre", "num", "release", "cover", "website", "uniqueid"}:
+                        actor_insert_at = idx
+                        break
+                for actor in list(root.findall("actor")):
+                    root.remove(actor)
+                    if actor_insert_at > 0:
+                        actor_insert_at -= 1
+                for offset, actor_name in enumerate(desired_actors):
+                    actor_elem = ET.Element("actor")
+                    name_elem = ET.SubElement(actor_elem, "name")
+                    name_elem.text = actor_name
+                    role_elem = ET.SubElement(actor_elem, "role")
+                    role_elem.text = ""
+                    root.insert(actor_insert_at + offset, actor_elem)
+                modified = True
+
+        if "maker" in fields:
+            set_text("studio", meta.get("maker", ""))
+
+        if any(field in fields for field in ("date", "release_date")):
+            release_date = str(meta.get("release_date") or meta.get("date") or "").strip()
+            if release_date:
+                set_text("premiered", release_date)
+                set_text("release", release_date)
+                if len(release_date) >= 4 and release_date[:4].isdigit():
+                    set_text("year", release_date[:4])
+
+        if "director" in fields:
+            set_text("director", meta.get("director", ""))
+
+        if "label" in fields:
+            set_text("label", meta.get("label", ""))
+
+        if "series" in fields:
+            set_series_name(meta.get("series", ""))
+
+        if modified:
+            ET.indent(tree, space="  ")
+            tree.write(nfo_path, encoding="utf-8", xml_declaration=True)
+        return modified
+    except Exception as exc:
+        logger.warning("NFO metadata override sync failed for %s: %s", nfo_path, exc)
+        return False
+
+
 def _write_cover(
     fs_path: str,
     cover_url: str,
@@ -242,6 +510,8 @@ def _write_cover(
         return False
     if not cover_url:
         return False
+    if not _is_remote_url(cover_url):
+        return False
 
     sidecar_paths = resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta or {}), sidecar_config)
     cover_path = sidecar_paths.cover_path
@@ -250,6 +520,20 @@ def _write_cover(
     _ensure_parent(cover_path)
 
     return download_image(cover_url, cover_path)
+
+
+def _resolve_extrafanart_dir(
+    fs_path: str,
+    number: str,
+    meta: dict = None,
+    sidecar_config: dict = None,
+) -> str:
+    sidecar_paths = resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta or {}), sidecar_config)
+    discovered_sidecar = _discover_existing_centralized_sidecar(number, sidecar_config)
+    discovered_nfo = discovered_sidecar.get("nfo_path", "")
+    if discovered_nfo:
+        return str(Path(discovered_nfo).parent / Path(sidecar_paths.extrafanart_dir).name)
+    return sidecar_paths.extrafanart_dir
 
 
 def _write_extrafanart(
@@ -263,8 +547,7 @@ def _write_extrafanart(
     if not write_extrafanart or not sample_images:
         return []
 
-    sidecar_paths = resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta or {}), sidecar_config)
-    extrafanart_dir = Path(sidecar_paths.extrafanart_dir)
+    extrafanart_dir = Path(_resolve_extrafanart_dir(fs_path, number, meta or {}, sidecar_config))
     os.makedirs(str(extrafanart_dir), exist_ok=True)
 
     written_uris: List[str] = []
@@ -327,6 +610,72 @@ def _db_sync_local_assets(
         repo.update_sample_images(path_uri, written_uris)
 
 
+def _list_strings(value) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    out: List[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _sync_actress_metadata(meta: dict) -> None:
+    profiles = meta.get("actress_profiles") or []
+    alias_map = meta.get("actress_aliases") or {}
+    if not profiles and not alias_map:
+        return
+
+    actress_repo = ActressRepository()
+    alias_repo = AliasRepository()
+    synced_names: set[str] = set()
+
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        name = str(profile.get("name") or "").strip()
+        if not name:
+            continue
+        aliases = _list_strings(profile.get("aliases"))
+        actress = Actress(
+            name=name,
+            name_en=str(profile.get("name_en") or "").strip() or None,
+            birth=str(profile.get("birth") or "").strip() or None,
+            height=profile.get("height"),
+            cup=str(profile.get("cup") or "").strip() or None,
+            bust=profile.get("bust"),
+            waist=profile.get("waist"),
+            hip=profile.get("hip"),
+            hometown=str(profile.get("hometown") or "").strip() or None,
+            aliases=aliases,
+            tags=_list_strings(profile.get("tags")),
+            nickname=str(profile.get("nickname") or "").strip() or None,
+            official_url=str(profile.get("official_url") or "").strip() or None,
+            photo_source=str(profile.get("photo_source") or "").strip() or None,
+            primary_text_source=str(profile.get("primary_text_source") or "theporndb").strip() or "theporndb",
+        )
+        try:
+            actress_repo.save(actress)
+            alias_repo.sync_from_favorite(name, aliases, source="theporndb")
+            synced_names.add(name)
+        except Exception as exc:
+            logger.warning("ThePornDB actress sync failed for %s: %s", name, exc)
+
+    if isinstance(alias_map, dict):
+        for raw_name, raw_aliases in alias_map.items():
+            name = str(raw_name or "").strip()
+            if not name or name in synced_names:
+                continue
+            aliases = _list_strings(raw_aliases)
+            if not aliases:
+                continue
+            try:
+                alias_repo.sync_from_favorite(name, aliases, source="theporndb")
+            except Exception as exc:
+                logger.warning("ThePornDB alias sync failed for %s: %s", name, exc)
+
+
 def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a corpus field; corpus writes go via _db_upsert → repo.upsert which already has invalidate)
     file_path: str,
     number: str,
@@ -351,10 +700,6 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
         error=None,
     )
 
-    if not number:
-        _empty.error = "缺少番號"
-        return _empty
-
     if mode not in VALID_MODES:
         _empty.error = f"不支援的 mode: {mode}（合法值：fill_missing, db_to_sidecar, refresh_full）"
         return _empty
@@ -368,10 +713,24 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
         _empty.error = "檔案不存在"
         return _empty
 
+    number = str(number or "").strip()
+    if not number:
+        number = _search_query_from_path(fs_path)
+    else:
+        number = _prefer_path_date_separator(number, fs_path)
+    if not number:
+        _empty.error = "缺少可搜尋的番號或檔名"
+        return _empty
+
     repo = VideoRepository()
+    path_uri = to_file_uri(fs_path)
+    existing_record = _get_video_by_path(repo, path_uri)
     meta: dict = {}
     source_used = ""
     fields_filled: List[str] = []
+    discovered_sidecar: dict[str, str] = {}
+    metadata_override_fields: List[str] = []
+    skip_new_nfo_for_override_only = False
 
     if mode == "refresh_full":
         if scraper_data is None:
@@ -380,50 +739,108 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
         if not scraper_data:
             _empty.error = f"找不到 {number} 的資料"
             return _empty
+        number = str(scraper_data.get("number") or number).strip() or number
         meta = _scraper_to_meta(scraper_data)
         source_used = scraper_data.get("source", "scraper") or "scraper"
 
     elif mode == "db_to_sidecar":
-        db_hits = repo.get_by_numbers([number])
-        videos = db_hits.get(number, [])
-        if not videos:
+        video = existing_record or _first_video_by_number(repo, number)
+        if not video:
             _empty.error = f"DB 中找不到 {number} 的資料"
             return _empty
-        meta = _video_to_meta(videos[0])
+        meta = _video_to_meta(video)
         source_used = "db"
 
     else:
-        db_hits = repo.get_by_numbers([number])
-        videos = db_hits.get(number, [])
-
-        if videos:
-            meta = _video_to_meta(videos[0])
+        if existing_record:
+            meta = _video_to_meta(existing_record)
             source_used = "db"
         else:
-            nfo_p = Path(resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta), sidecar_config).nfo_path)
-            if nfo_p.exists():
-                _, root = parse_nfo(str(nfo_p))
+            video = _first_video_by_number(repo, number)
+            if video:
+                meta = _video_to_meta(video)
+                source_used = "db"
+            else:
+                nfo_p = Path(resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta), sidecar_config).nfo_path)
+                if nfo_p.exists():
+                    _, root = parse_nfo(str(nfo_p))
+                    if root is not None:
+                        meta = _nfo_to_meta(root)
+                        source_used = "nfo"
+
+        discovered_sidecar = _discover_existing_centralized_sidecar(number, sidecar_config)
+        if discovered_sidecar:
+            discovered_nfo = discovered_sidecar.get("nfo_path", "")
+            if discovered_nfo:
+                _, root = parse_nfo(discovered_nfo)
                 if root is not None:
-                    meta = _nfo_to_meta(root)
-                    source_used = "nfo"
+                    nfo_meta = _nfo_to_meta(root)
+                    meta, nfo_fields_filled = _merge_meta(meta, nfo_meta, number=number)
+                    if str(nfo_meta.get("maker") or "").strip():
+                        meta["maker"] = str(nfo_meta.get("maker") or "").strip()
+                    fields_filled.extend(f for f in nfo_fields_filled if f not in fields_filled)
+            if source_used in ("", "db", "nfo"):
+                source_used = "sidecar"
+
+        meta, metadata_override_fields = apply_metadata_overrides(
+            meta,
+            [number, file_path, fs_path],
+            sidecar_config,
+        )
+        if metadata_override_fields:
+            fields_filled.extend(f for f in metadata_override_fields if f not in fields_filled)
+            if source_used in ("", "db", "nfo"):
+                source_used = "override"
 
         missing = _missing_fields(meta, number=number)
-        if missing:
+        sidecar_paths = resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta), sidecar_config)
+        local_cover = _existing_sidecar_cover_path(sidecar_paths) or discovered_sidecar.get("cover_path", "")
+        cover_url = meta.get("cover_url", "")
+        needs_cover_data = bool(write_cover and not local_cover and not _is_remote_url(cover_url))
+        sidecar_satisfies_requested_assets = bool(discovered_sidecar.get("nfo_path")) and (
+            not write_cover or bool(local_cover)
+        )
+        metadata_missing_needs_scraper = bool(missing)
+        if sidecar_satisfies_requested_assets:
+            core_missing_fields = {"title", "actresses"}
+            effective_missing = [
+                field
+                for field in missing
+                if not (field == "actresses" and field in metadata_override_fields)
+            ]
+            metadata_missing_needs_scraper = any(field in core_missing_fields for field in effective_missing)
+        needs_remote_cover = needs_cover_data and not sidecar_satisfies_requested_assets
+        if metadata_missing_needs_scraper or needs_remote_cover:
             if scraper_data is None:
                 scraper_data = search_jav(number, proxy_url=proxy_url,
                                           source=source or 'auto', javbus_lang=javbus_lang)
             if not scraper_data:
-                _empty.error = f"找不到 {number} 的資料"
-                return _empty
-            supplement = _scraper_to_meta(scraper_data)
-            meta, fields_filled = _merge_meta(meta, supplement, number=number)
-            source_used = scraper_data.get("source", "scraper") or "scraper"
+                if not discovered_sidecar:
+                    if not metadata_override_fields:
+                        _empty.error = f"找不到 {number} 的資料"
+                        return _empty
+                    skip_new_nfo_for_override_only = True
+            else:
+                number = str(scraper_data.get("number") or number).strip() or number
+                supplement = _scraper_to_meta(scraper_data)
+                meta, fields_filled = _merge_meta(meta, supplement, number=number)
+                source_used = scraper_data.get("source", "scraper") or "scraper"
+
+    meta, later_override_fields = apply_metadata_overrides(
+        meta,
+        [number, file_path, fs_path],
+        sidecar_config,
+    )
+    if later_override_fields:
+        metadata_override_fields = later_override_fields
+        fields_filled.extend(f for f in later_override_fields if f not in fields_filled)
+        if source_used in ("", "db", "nfo"):
+            source_used = "override"
 
     has_subtitle = bool(find_subtitle_files(fs_path))
 
     # 讀取 DB 現有 user_tags，在 NFO 寫出和 DB upsert 時保留
     path_uri = to_file_uri(fs_path)
-    existing_record = repo.get_by_path(path_uri)
     preserved_user_tags = existing_record.user_tags if existing_record else []
 
     nfo_written = False
@@ -432,7 +849,7 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
             fs_path=fs_path,
             number=number,
             meta=meta,
-            write_nfo=write_nfo,
+            write_nfo=write_nfo and not skip_new_nfo_for_override_only,
             overwrite_existing=overwrite_existing,
             has_subtitle=has_subtitle,
             user_tags=preserved_user_tags,
@@ -464,8 +881,16 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
     extrafanart_written = len(written_uris)
     sidecar_paths = resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta), sidecar_config)
     nfo_path = Path(sidecar_paths.nfo_path)
+    if not nfo_path.exists() and discovered_sidecar.get("nfo_path"):
+        nfo_path = Path(discovered_sidecar["nfo_path"])
+    nfo_sync_fields: list[str] = []
+    for field in [*metadata_override_fields, *fields_filled]:
+        if field not in nfo_sync_fields:
+            nfo_sync_fields.append(field)
+    if nfo_sync_fields and write_nfo and _sync_nfo_metadata_overrides(nfo_path, meta, nfo_sync_fields):
+        nfo_written = True
     nfo_mtime = nfo_path.stat().st_mtime if nfo_path.exists() else 0.0
-    local_cover = _existing_sidecar_cover_path(sidecar_paths)
+    local_cover = _existing_sidecar_cover_path(sidecar_paths) or discovered_sidecar.get("cover_path", "")
 
     # DB upsert 在寫檔後執行，才能知道本地封面路徑
     # db_to_sidecar 不打 scraper 也不更新 DB（metadata 不變）
@@ -543,25 +968,41 @@ def _db_upsert(
 
         video = Video(
             path=path_uri,
-            number=number,
-            title=meta.get("title", ""),
-            original_title=meta.get("original_title", ""),
-            actresses=meta.get("actresses", []),
-            maker=meta.get("maker", ""),
-            director=meta.get("director", ""),
-            series=meta.get("series") or None,
-            label=meta.get("label", ""),
-            tags=meta.get("tags", []),
+            number=number or (existing.number if existing else None),
+            title=_choose_text(
+                meta.get("title", ""),
+                existing.title if existing else "",
+                number=number,
+                placeholder_sensitive=True,
+            ),
+            original_title=_choose_text(
+                meta.get("original_title", ""),
+                existing.original_title if existing else "",
+            ),
+            actresses=_choose_list(
+                sanitize_actor_names(meta.get("actresses", []), maker=meta.get("maker", ""), number=number),
+                sanitize_actor_names(
+                    existing.actresses if existing else [],
+                    maker=existing.maker if existing else "",
+                    number=number or (existing.number if existing else ""),
+                ),
+            ),
+            maker=_choose_text(meta.get("maker", ""), existing.maker if existing else ""),
+            director=_choose_text(meta.get("director", ""), existing.director if existing else ""),
+            series=_choose_text(meta.get("series", ""), existing.series if existing else "") or None,
+            label=_choose_text(meta.get("label", ""), existing.label if existing else ""),
+            tags=_choose_list(meta.get("tags", []), existing.tags if existing else []),
             user_tags=preserved_user_tags,
             sample_images=sample_imgs,
-            duration=meta.get("duration"),
+            duration=meta.get("duration") if meta.get("duration") is not None else (existing.duration if existing else None),
             size_bytes=existing.size_bytes if existing else 0,
             cover_path=cover_uri,
-            release_date=meta.get("release_date", ""),
+            release_date=_choose_text(meta.get("release_date", ""), existing.release_date if existing else ""),
             mtime=existing.mtime if existing else 0.0,
             nfo_mtime=nfo_mtime,
         )
         repo.upsert(video)
+        _sync_actress_metadata(meta)
     except Exception as e:
         logger.warning("DB upsert 失敗: %s", e)
 
@@ -601,6 +1042,15 @@ def fetch_samples_only(
         _empty.error = "檔案不存在"
         return _empty
 
+    number = str(number or "").strip()
+    if not number:
+        number = _search_query_from_path(fs_path)
+    else:
+        number = _prefer_path_date_separator(number, fs_path)
+    if not number:
+        _empty.error = "缺少可搜尋的番號或檔名"
+        return _empty
+
     meta = search_jav(number, proxy_url=proxy_url,
                       source="auto", javbus_lang=None)
     if not meta:
@@ -608,6 +1058,7 @@ def fetch_samples_only(
         _empty.error = f"找不到 {number} 的資料"
         return _empty
 
+    number = _prefer_path_date_separator(str(meta.get("number") or number).strip() or number, fs_path)
     sample_images = meta.get("sample_images", [])
     sidecar_meta = _sidecar_meta(number, _scraper_to_meta(meta))
     written_uris = _write_extrafanart(

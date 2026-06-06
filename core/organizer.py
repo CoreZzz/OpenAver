@@ -12,6 +12,7 @@ import html
 from pathlib import Path
 from PIL import Image
 from typing import Optional, Dict, Any, List
+from urllib.parse import urlparse
 
 from core.path_utils import normalize_path
 from core.scrapers.utils import has_chinese, check_subtitle, strip_subtitle_markers
@@ -24,7 +25,9 @@ logger = get_logger(__name__)
 # HTTP 請求設定
 REQUEST_TIMEOUT = 30
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+    'Accept-Language': 'ja-JP,ja;q=0.9,zh-TW;q=0.8,zh;q=0.7,en;q=0.6',
 }
 
 
@@ -282,6 +285,23 @@ def generate_jellyfin_images(cover_path: str, base_stem: str) -> dict:
     return result
 
 
+def _image_referer_for_url(url: str) -> str:
+    host = urlparse(str(url or "")).netloc.lower()
+    if "javbus.com" in host:
+        return "https://www.javbus.com/"
+    if "jav321.com" in host:
+        return "https://www.jav321.com/"
+    if "dmm.co.jp" in host:
+        return "https://www.dmm.co.jp/"
+    if "1pondo.tv" in host:
+        return "https://www.1pondo.tv/"
+    if "caribbeancom.com" in host or "pacopacomama.com" in host:
+        return "https://www.caribbeancom.com/"
+    if "contents.fc2.com" in host:
+        return "https://adult.contents.fc2.com/"
+    return ""
+
+
 def download_image(url: str, save_path: str, referer: str = '') -> bool:
     """下載圖片"""
     if not url:
@@ -291,21 +311,30 @@ def download_image(url: str, save_path: str, referer: str = '') -> bool:
 
         # 根據 URL 設置對應的 Referer
         if not referer:
-            if "javbus.com" in url:
-                referer = "https://www.javbus.com/"
-            elif "dmm.co.jp" in url:
-                referer = "https://www.dmm.co.jp/"
-            elif "jav321.com" in url:
-                referer = "https://www.jav321.com/"
+            referer = _image_referer_for_url(url)
 
         if referer:
             headers['Referer'] = referer
 
-        resp = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-        if resp.status_code == 200 and len(resp.content) > 1000:
-            with open(save_path, 'wb') as f:
-                f.write(resp.content)
-            return True
+        last_error = None
+        for _attempt in range(3):
+            try:
+                resp = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+                content_type = resp.headers.get('Content-Type', '')
+                if (
+                    resp.status_code == 200
+                    and len(resp.content) > 1000
+                    and (not content_type or content_type.startswith('image/'))
+                ):
+                    with open(save_path, 'wb') as f:
+                        f.write(resp.content)
+                    return True
+                last_error = f"HTTP {resp.status_code} {content_type}"
+            except Exception as exc:
+                last_error = exc
+                continue
+        if last_error:
+            logger.warning("[!] 下載圖片失敗: %s", last_error)
     except Exception as e:
         logger.warning(f"[!] 下載圖片失敗: {e}")
     return False

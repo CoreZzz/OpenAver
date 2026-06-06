@@ -86,6 +86,38 @@ IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
 DEFAULT_CACHE_FILE = "gallery_cache.json"
 
 
+def _sidecar_stem_candidates(stem: str) -> List[str]:
+    """Return filename stems that may own sidecars for a media stem."""
+    identity = parse_media_identity(stem)
+    candidates = [
+        identity.raw_stem,
+        identity.canonical_number,
+        identity.search_number,
+        identity.work_key,
+        *identity.number_aliases,
+    ]
+    out: List[str] = []
+    seen = set()
+    for value in candidates:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
+
+
+def _matching_nfo_mtime(stem: str, dir_nfos: Dict[str, float]) -> float:
+    mtimes = [
+        dir_nfos.get(candidate.lower(), 0)
+        for candidate in _sidecar_stem_candidates(stem)
+    ]
+    return max(mtimes) if mtimes else 0
+
+
 def fast_scan_directory(
     directory: str,
     extensions: set,
@@ -137,7 +169,7 @@ def fast_scan_directory(
                             if ext == '.nfo':
                                 # 記錄 NFO 的 mtime
                                 try:
-                                    dir_nfos[stem] = entry.stat().st_mtime
+                                    dir_nfos[stem.lower()] = entry.stat().st_mtime
                                 except OSError as e:
                                     _safe_on_skip(entry.path, e)
                             elif ext in extensions:
@@ -155,7 +187,7 @@ def fast_scan_directory(
 
                 # 將 NFO mtime 加入對應的影片資訊
                 for f in dir_files:
-                    f['nfo_mtime'] = dir_nfos.get(f['stem'], 0)
+                    f['nfo_mtime'] = _matching_nfo_mtime(f['stem'], dir_nfos)
                     del f['stem']  # 不需要保留 stem
                     results.append(f)
 
@@ -243,6 +275,7 @@ class VideoScanner:
         self.name_mapping = load_name_mapping()
         # key: dir path str → (sorted videos list, sorted images list)
         self._dir_scan_cache: Dict[str, Tuple[List[str], List[str]]] = {}
+        self._centralized_nfo_cache: Dict[str, List[Path]] = {}
 
     def normalize_maker(self, num: str, maker: str) -> str:
         """根據 name mapping 和番號前綴正規化片商名稱
@@ -379,6 +412,97 @@ class VideoScanner:
         sidecar_meta = self._sidecar_metadata(video_path, filename_info, metadata)
         return resolve_sidecar_paths(str(video_path), sidecar_meta, self.sidecar_config)
 
+    def _sidecar_section(self) -> dict:
+        config = self.sidecar_config or {}
+        raw = config.get("sidecar") if isinstance(config, dict) and "sidecar" in config else config
+        return raw if isinstance(raw, dict) else {}
+
+    @staticmethod
+    def _render_sidecar_name(template: str, number: str, default: str) -> str:
+        rendered = (template or default).replace("{num}", number).replace("{number}", number)
+        return rendered or default
+
+    def _discover_centralized_nfos(self, number: str) -> List[Path]:
+        number = str(number or "").strip()
+        if not number:
+            return []
+
+        cache_key = number.upper()
+        if cache_key in self._centralized_nfo_cache:
+            return self._centralized_nfo_cache[cache_key]
+
+        sidecar = self._sidecar_section()
+        if sidecar.get("mode") != "centralized" or not str(sidecar.get("root_dir") or "").strip():
+            self._centralized_nfo_cache[cache_key] = []
+            return []
+
+        try:
+            root = Path(uri_to_fs_path(str(sidecar["root_dir"])))
+        except ValueError:
+            self._centralized_nfo_cache[cache_key] = []
+            return []
+        if not root.exists():
+            self._centralized_nfo_cache[cache_key] = []
+            return []
+
+        template = str(sidecar.get("nfo_filename") or "{num}.nfo")
+        names = set()
+        for stem in _sidecar_stem_candidates(number):
+            names.add(f"{stem}.nfo")
+            names.add(self._render_sidecar_name(template, stem, f"{stem}.nfo"))
+
+        matches: List[Path] = []
+        seen = set()
+        for name in sorted(n for n in names if n):
+            try:
+                found = sorted(root.rglob(name), key=lambda p: str(p).lower())
+            except OSError as exc:
+                logger.warning("centralized NFO discovery failed for %s: %s", number, exc)
+                found = []
+            for path in found:
+                key = str(path).lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                matches.append(path)
+
+        cover_name = str(sidecar.get("cover_filename") or "cover.jpg")
+        matches.sort(key=lambda p: (not (p.parent / cover_name).is_file(), str(p).lower()))
+        self._centralized_nfo_cache[cache_key] = matches
+        return matches
+
+    def _existing_nfo_candidates(
+        self,
+        video_path: Path,
+        filename_info: VideoInfo,
+        metadata: Optional[dict] = None,
+    ) -> List[Path]:
+        sidecar_paths = self._resolve_sidecar_paths(video_path, filename_info, metadata)
+        same_dir_sidecars = self._same_directory_sidecar_paths(video_path, filename_info, metadata)
+        numbers = [
+            filename_info.num,
+            (metadata or {}).get("canonical_number"),
+            (metadata or {}).get("number"),
+            (metadata or {}).get("num"),
+        ]
+        discovered: List[Path] = []
+        for number in numbers:
+            discovered.extend(self._discover_centralized_nfos(str(number or "")))
+
+        return self._unique_existing_paths(
+            sidecar_paths.nfo_path,
+            *same_dir_sidecars["nfo"],
+            video_path.with_suffix('.nfo'),
+            *discovered,
+        )
+
+    def sidecar_nfo_mtime(self, video_path: str | Path, metadata: Optional[dict] = None) -> float:
+        path = Path(video_path)
+        filename_info = self.parse_filename(path.name)
+        filename_info.maker = self.normalize_maker(filename_info.num, filename_info.maker)
+        candidates = self._existing_nfo_candidates(path, filename_info, metadata)
+        return candidates[0].stat().st_mtime if candidates else 0.0
+
     @staticmethod
     def _unique_existing_paths(*paths: str | Path) -> List[Path]:
         seen = set()
@@ -394,6 +518,41 @@ class VideoScanner:
             if path.exists():
                 result.append(path)
         return result
+
+    def _same_directory_sidecar_paths(
+        self,
+        video_path: Path,
+        filename_info: VideoInfo,
+        metadata: Optional[dict] = None,
+    ) -> dict[str, List[Path]]:
+        """Return same-directory canonical sidecar candidates for variants."""
+        metadata = metadata or {}
+        raw_stems = [
+            video_path.stem,
+            filename_info.num,
+            metadata.get("canonical_number"),
+            metadata.get("number"),
+            metadata.get("num"),
+        ]
+        stems: List[str] = []
+        seen = set()
+        for raw in raw_stems:
+            for candidate in _sidecar_stem_candidates(str(raw or "")):
+                key = candidate.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                stems.append(candidate)
+
+        base_dir = video_path.parent
+        nfo_paths = [base_dir / f"{stem}.nfo" for stem in stems]
+        image_paths: List[Path] = []
+        for stem in stems:
+            for ext in IMAGE_EXTENSIONS:
+                image_paths.append(base_dir / f"{stem}{ext}")
+                image_paths.append(base_dir / f"{stem}-poster{ext}")
+                image_paths.append(base_dir / f"{stem}-fanart{ext}")
+        return {"nfo": nfo_paths, "images": image_paths}
 
     def parse_nfo(self, nfo_path: str) -> Optional[VideoInfo]:
         """讀取 NFO 檔案"""
@@ -652,14 +811,12 @@ class VideoScanner:
         filename_info = self.parse_filename(video_path.name)
         filename_info.maker = self.normalize_maker(filename_info.num, filename_info.maker)
         sidecar_paths = self._resolve_sidecar_paths(video_path, filename_info, metadata)
+        same_dir_sidecars = self._same_directory_sidecar_paths(video_path, filename_info, metadata)
 
         # 嘗試讀取 NFO
         nfo_path = None
         t_nfo_check = time.time()
-        nfo_candidates = self._unique_existing_paths(
-            sidecar_paths.nfo_path,
-            video_path.with_suffix('.nfo'),
-        )
+        nfo_candidates = self._existing_nfo_candidates(video_path, filename_info, metadata)
         if nfo_candidates:
             nfo_path = nfo_candidates[0]
             logger.debug(f"[Scan]   nfo_exists: {t_nfo_check - t_start:.2f}s")
@@ -704,12 +861,14 @@ class VideoScanner:
             metadata,
         )
         sidecar_paths = resolve_sidecar_paths(str(video_path), final_metadata, self.sidecar_config)
+        same_dir_sidecars = self._same_directory_sidecar_paths(video_path, filename_info, final_metadata)
 
         # 尋找封面圖片
         sidecar_image_candidates = self._unique_existing_paths(
             sidecar_paths.cover_path,
             sidecar_paths.poster_path,
             sidecar_paths.fanart_path,
+            *same_dir_sidecars["images"],
         )
         img_path = str(sidecar_image_candidates[0]) if sidecar_image_candidates else ""
         if not img_path:
@@ -806,6 +965,26 @@ class VideoScanner:
             current_file_uris.add(file_uri)
 
             db_entry = db_index.get(file_uri)
+            if db_entry is not None:
+                db_video = repo.get_by_path(file_uri)
+                if db_video is not None:
+                    file_info['_sidecar_metadata'] = {
+                        "number": db_video.number or "",
+                        "num": db_video.number or "",
+                        "canonical_number": db_video.number or "",
+                        "maker": db_video.maker or "",
+                        "title": db_video.title or db_video.original_title or "",
+                        "actors": db_video.actresses or [],
+                        "date": db_video.release_date or "",
+                        "release_date": db_video.release_date or "",
+                    }
+            sidecar_mtime = self.sidecar_nfo_mtime(
+                fs_path,
+                file_info.get('_sidecar_metadata'),
+            )
+            if sidecar_mtime:
+                file_info['nfo_mtime'] = sidecar_mtime
+
             if db_entry is None:
                 # 新檔案
                 needs_scan.append(file_info)
@@ -833,7 +1012,11 @@ class VideoScanner:
             logger.info(f"[{i}/{total_needs_scan}] 處理: {video_name}")
 
             try:
-                video_info = self.scan_file(file_info['path'], None)
+                video_info = self.scan_file(
+                    file_info['path'],
+                    None,
+                    file_info.get('_sidecar_metadata'),
+                )
                 video = Video.from_video_info(video_info)
                 video.mtime = file_info['mtime']
                 video.nfo_mtime = file_info.get('nfo_mtime', 0)

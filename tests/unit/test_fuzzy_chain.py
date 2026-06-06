@@ -11,6 +11,7 @@ from core.scrapers.dmm import DMMScraper
 from core.scrapers.javbus import JavBusScraper
 from core.scrapers.jav321 import JAV321Scraper
 from core.scrapers.javdb import JavDBScraper
+from core.scrapers.missav import MissAVScraper
 from core.scrapers.models import Video
 
 
@@ -81,6 +82,7 @@ class TestFuzzyChain:
                             lambda: ['dmm', 'javbus', 'jav321', 'javdb'])
 
         with patch.object(DMMScraper, 'search_by_keyword_with_ids') as mock_dmm, \
+             patch.object(JavDBScraper, 'search_by_keyword', return_value=[]), \
              patch.object(JavBusScraper, 'get_ids_from_search',
                           return_value=['SONE-205']) as mock_jb, \
              patch('core.scraper.search_jav',
@@ -103,6 +105,7 @@ class TestFuzzyChain:
 
         # side_effect: first page returns ids, subsequent pages empty (stops pagination)
         with patch.object(AVSOXScraper, 'search', return_value=None) as mock_avsox, \
+             patch.object(JavDBScraper, 'search_by_keyword', return_value=[]), \
              patch.object(JavBusScraper, 'get_ids_from_search',
                           side_effect=[['TEST-001'], []]) as mock_jb, \
              patch('core.scraper.search_jav',
@@ -185,6 +188,21 @@ class TestFuzzyChain:
         results = _fuzzy_search_chain("actress", proxy_url='')
         assert results == []
 
+    def test_theporndb_fuzzy_requires_enabled_token(self, monkeypatch):
+        """ThePornDB remains opt-in for keyword/title fan-out."""
+        from core.scraper import _fuzzy_search_chain
+
+        monkeypatch.setattr("core.scraper.get_all_source_ids_ordered",
+                            lambda: ['theporndb'])
+        monkeypatch.setattr("core.scraper._is_theporndb_keyword_enabled",
+                            lambda: False)
+
+        with patch("core.scraper.ThePornDBScraper") as mock_scraper:
+            results = _fuzzy_search_chain("western title", proxy_url='')
+
+        mock_scraper.assert_not_called()
+        assert results == []
+
     # ---- 8. seed 只由第一個實際發動源送 ----
     def test_seed_sent_exactly_once_by_first_dispatched_source(self, monkeypatch):
         """order=['dmm','javbus']，proxy=''（DMM 被跳過）→ seed 由 javbus 送，恰好 1 次"""
@@ -200,6 +218,7 @@ class TestFuzzyChain:
                 seed_calls.append(data)
 
         with patch.object(DMMScraper, 'search_by_keyword_with_ids') as mock_dmm, \
+             patch.object(JavDBScraper, 'search_by_keyword', return_value=[]), \
              patch.object(JavBusScraper, 'get_ids_from_search',
                           side_effect=[['SONE-205'], []]) as mock_jb, \
              patch('core.scraper.search_jav',
@@ -236,19 +255,40 @@ class TestFuzzyChain:
         mock_jb.assert_called()        # JavBus tried as next
         assert len(results) == 1
 
-    # ---- 10. javdb 不在 FUZZY_SEARCH_SOURCES → 鏈忽略 javdb（TASK-65g） ----
-    def test_javdb_excluded_from_fuzzy_pool(self, monkeypatch):
-        """javdb 不在 FUZZY_SEARCH_SOURCES → order=['javdb'] 交集後 chain=[] → 回 []"""
+    # ---- 10. JavDB participates late in the fuzzy pool ----
+    def test_javdb_included_in_fuzzy_pool(self, monkeypatch):
+        """JavDB keyword search is available as a late fallback source."""
         from core.scraper import _fuzzy_search_chain
 
         monkeypatch.setattr("core.scraper.get_all_source_ids_ordered",
                             lambda: ['javdb'])
 
-        with patch.object(JavDBScraper, 'search_by_keyword', return_value=[]) as mock_javdb:
+        with patch.object(JavDBScraper, 'search_by_keyword',
+                          return_value=[_make_video("javdb", "JAVDB-001")]) as mock_javdb:
             results = _fuzzy_search_chain("actress", proxy_url='')
 
-        mock_javdb.assert_not_called()  # javdb filtered out by FUZZY_SEARCH_SOURCES intersection
-        assert results == []
+        mock_javdb.assert_called_once_with("actress", limit=20)
+        assert results[0]["number"] == "JAVDB-001"
+        assert results[0]["_source"] == "javdb"
+
+    def test_missav_included_after_javdb_in_fuzzy_pool(self, monkeypatch):
+        """MissAV keyword search is available as a JavDB fallback source."""
+        from core.scraper import _fuzzy_search_chain
+
+        monkeypatch.setattr("core.scraper.get_all_source_ids_ordered",
+                            lambda: ['javbus', 'missav', 'javdb'])
+
+        with patch.object(JavDBScraper, 'search_by_keyword', return_value=[]) as mock_javdb, \
+             patch.object(MissAVScraper, 'search_by_keyword',
+                          return_value=[_make_video("missav", "MISSAV-001")]) as mock_missav, \
+             patch.object(JavBusScraper, 'get_ids_from_search') as mock_javbus:
+            results = _fuzzy_search_chain("actress", proxy_url='')
+
+        mock_javdb.assert_called_once_with("actress", limit=20)
+        mock_missav.assert_called_once_with("actress", limit=20)
+        mock_javbus.assert_not_called()
+        assert results[0]["number"] == "MISSAV-001"
+        assert results[0]["_source"] == "missav"
 
     # ---- 11. `_get_fuzzy_source` 已刪 ----
     def test_get_fuzzy_source_deleted(self):
@@ -419,3 +459,24 @@ class TestFuzzyDmmSource:
         assert len(results) == 1, f"Expected 1 result, got {results}"
         assert results[0]['_source'] == 'dmm', \
             f"Expected _source='dmm', got {results[0].get('_source')!r}"
+
+
+def test_western_title_uses_title_sources_without_javbus_keyword(monkeypatch):
+    """Western scene filenames should not fan out through Japanese keyword search."""
+    from core.scraper import _fuzzy_search_chain
+
+    query = "Blacked.16.12.26.Lena.Paul.And.Angela.White"
+    monkeypatch.setattr("core.scraper.get_all_source_ids_ordered",
+                        lambda: ['javbus', 'javdb', 'theporndb'])
+
+    with patch.object(JavBusScraper, 'get_ids_from_search') as mock_javbus, \
+         patch.object(JavDBScraper, 'search',
+                      return_value=_make_video("javdb", "BLACKED-161226")) as mock_search, \
+         patch.object(JavDBScraper, 'search_by_keyword') as mock_keyword:
+        results = _fuzzy_search_chain(query, proxy_url='')
+
+    mock_javbus.assert_not_called()
+    mock_search.assert_called_once_with(query)
+    mock_keyword.assert_not_called()
+    assert results[0]["number"] == "BLACKED-161226"
+    assert results[0]["_source"] == "javdb"

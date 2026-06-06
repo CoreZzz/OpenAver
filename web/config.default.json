@@ -53,6 +53,7 @@
     "javbus": false,
     "jav321": false,
     "javdb": false,
+    "missav": false,
     "avsox": false
   },
   "translate": {
@@ -145,12 +146,25 @@
       "is_censored": true
     },
     {
+      "id": "missav",
+      "type": "builtin",
+      "display_name_key": "MissAV",
+      "display_name_raw": "",
+      "enabled": true,
+      "order": 4,
+      "config": {},
+      "is_beta": false,
+      "manual_only": false,
+      "requires_proxy": false,
+      "is_censored": true
+    },
+    {
       "id": "d2pass",
       "type": "builtin",
       "display_name_key": "D2Pass",
       "display_name_raw": "",
       "enabled": true,
-      "order": 4,
+      "order": 5,
       "config": {},
       "is_beta": false,
       "manual_only": false,
@@ -163,7 +177,7 @@
       "display_name_key": "HEYZO",
       "display_name_raw": "",
       "enabled": true,
-      "order": 5,
+      "order": 6,
       "config": {},
       "is_beta": false,
       "manual_only": false,
@@ -176,7 +190,7 @@
       "display_name_key": "FC2",
       "display_name_raw": "",
       "enabled": true,
-      "order": 6,
+      "order": 7,
       "config": {},
       "is_beta": false,
       "manual_only": false,
@@ -189,14 +203,30 @@
       "display_name_key": "AVSOX",
       "display_name_raw": "",
       "enabled": true,
-      "order": 7,
+      "order": 8,
       "config": {},
+      "is_beta": false,
+      "manual_only": false,
+      "requires_proxy": false,
+      "is_censored": false
+    },
+    {
+      "id": "theporndb",
+      "type": "builtin",
+      "display_name_key": "ThePornDB",
+      "display_name_raw": "",
+      "enabled": false,
+      "order": 9,
+      "config": {
+        "api_token": ""
+      },
       "is_beta": false,
       "manual_only": false,
       "requires_proxy": false,
       "is_censored": false
     }
   ],
+  "metadata_overrides": [],
   "advanced_search_enabled": false,
   "metatube": {
     "enabled": false,

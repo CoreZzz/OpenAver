@@ -171,6 +171,7 @@ export function searchStateBase() {
             'javbus': 'JavBus',
             'jav321': 'Jav321',
             'javdb': 'JavDB',
+            'missav': 'MissAV',
             'fc2': 'FC2',
             'avsox': 'AVSOX'
         },

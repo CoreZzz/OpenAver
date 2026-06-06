@@ -47,6 +47,39 @@ class TestCanonicalNumber:
     def test_invalid_noise_prefix(self):
         assert parse_media_identity("random_movie_2024.mp4").canonical_number is None
 
+    def test_single_letter_n_number(self):
+        identity = parse_media_identity("N0808.mp4")
+        assert identity.canonical_number == "N-0808"
+        assert identity.number_aliases == ["N-0808", "N0808"]
+
+    def test_compact_red_is_distinct_from_hyphenated_red(self):
+        compact = parse_media_identity("RED155.avi")
+        hyphenated = parse_media_identity("RED-155.avi")
+
+        assert compact.canonical_number == "RED155"
+        assert compact.number_aliases == ["RED155"]
+        assert hyphenated.canonical_number == "RED-155"
+        assert hyphenated.number_aliases == ["RED-155"]
+
+    def test_known_three_digit_prefix_pads_short_number(self):
+        hyphenated = parse_media_identity("ZMIN-05 淫尻授業.mp4")
+        compact = parse_media_identity("ZMIN05.mp4")
+
+        assert hyphenated.canonical_number == "ZMIN-005"
+        assert hyphenated.number_aliases == ["ZMIN-005"]
+        assert compact.canonical_number == "ZMIN-005"
+
+    def test_unconfigured_short_number_prefix_is_not_padded(self):
+        identity = parse_media_identity("JS-19.mp4")
+        assert identity.canonical_number == "JS-19"
+
+    def test_western_title_keeps_title_stem_without_fake_number(self):
+        identity = parse_media_identity(
+            "Blacked.16.12.26.Lena.Paul.And.Angela.White.Lena.Gets.Her.Groove.Back.4k.mp4"
+        )
+        assert identity.canonical_number is None
+        assert identity.raw_stem.startswith("Blacked.16.12.26")
+
 
 class TestVariantFlags:
     def test_c_is_chinese_subtitle(self):
@@ -102,3 +135,20 @@ class TestSourceQueries:
     def test_non_fc2_uses_canonical(self):
         identity = parse_media_identity("sone_103_uc.mp4")
         assert build_source_queries(identity, "javbus") == ["SONE-103"]
+
+    def test_compact_red_query_does_not_try_hyphenated_red(self):
+        identity = parse_media_identity("RED155.avi")
+        assert build_source_queries(identity, "javdb") == ["RED155"]
+        assert build_source_queries(identity, "jav321") == ["RED155"]
+
+    def test_zmin_source_query_uses_padded_canonical(self):
+        identity = parse_media_identity("ZMIN-05.mp4")
+        assert build_source_queries(identity, "javbus") == ["ZMIN-005"]
+        assert build_source_queries(identity, "jav321") == ["ZMIN-005"]
+
+    def test_date_style_keeps_canonical_and_d2pass_uses_exact_separator(self):
+        identity = parse_media_identity("102318_778.mp4")
+        assert identity.canonical_number == "102318_778"
+        assert identity.work_key == "102318_778"
+        assert build_source_queries(identity, "d2pass") == ["102318_778"]
+        assert build_source_queries(identity, "javdb") == ["102318_778", "102318-778"]

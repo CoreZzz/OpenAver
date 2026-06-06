@@ -174,7 +174,7 @@ def test_local_candidates_no_alias_single_name(client):
 
 def test_cloud_sources_use_primary_name_only(client):
     """
-    雲端 scraper（graphis / gfriends / wiki / minnano）的 _fetch_single_source
+    雲端 scraper（gfriends / javdb / graphis / wiki / minnano）的 _fetch_single_source
     應收到 URL path param（即 "alice"），不被 alias set 污染。
     """
     mock_actress = _make_mock_actress("alice")

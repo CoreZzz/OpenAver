@@ -307,6 +307,89 @@ class TestCaribbeancomHtmlFallback:
         assert video.sample_images[0] == "https://www.caribbeancom.com/moviepages/070116-197/images/l/001.jpg"
         assert video.cover_url == "https://www.caribbeancom.com/moviepages/070116-197/images/l_l.jpg"
 
+    def test_html_fallback_extracts_pacopacomama_cover(self, scraper):
+        html = """\
+<html><body>
+<h1>Test Title</h1>
+<script>
+var sample_image = 'https://www.pacopacomama.com/assets/sample/072220_001/'+'l_hd.jpg';
+</script>
+</body></html>
+"""
+        scraper._session.get = MagicMock(side_effect=[
+            make_404_response(),
+            make_404_response(),
+            make_html_response(html),
+        ])
+
+        video = scraper.search("072220_001")
+
+        assert video is not None
+        assert video.cover_url == "https://www.pacopacomama.com/assets/sample/072220_001/l_hd.jpg"
+
+    def test_html_fallback_filters_login_link_from_actresses(self, scraper):
+        """出演區塊混入導覽登入連結時，不把ログイン當女優。"""
+        html = """\
+<html><body>
+<h1>テストタイトル</h1>
+<ul class="movie-info">
+  <li><span>出演</span> <a href="/login/">ログイン</a> <a href="/signup/">無料会員登録</a> <a href="/search_act/6706/1.html">上原亜衣</a></li>
+</ul>
+</body></html>
+"""
+        scraper._session.get = MagicMock(side_effect=[make_404_response(), make_html_response(html)])
+
+        video = scraper.search("070116-197")
+
+        assert video is not None
+        assert [a.name for a in video.actresses] == ["上原亜衣"]
+
+    def test_html_fallback_extracts_nested_actor_name(self, scraper):
+        """Caribbeancom 演員連結文字包在 itemprop=name span 時也能解析。"""
+        html = """\
+<html><body>
+<h1>テストタイトル</h1>
+<ul class="movie-info">
+  <li class="movie-spec">
+    <span class="spec-title">出演</span>
+    <span class="spec-content">
+      <a class="spec__tag" itemprop="actor" href="/search_act/6096/1.html"><span itemprop="name">小早川怜子</span></a>
+    </span>
+  </li>
+</ul>
+</body></html>
+"""
+        scraper._session.get = MagicMock(side_effect=[make_404_response(), make_html_response(html)])
+
+        video = scraper.search("102318-778")
+
+        assert video is not None
+        assert [a.name for a in video.actresses] == ["小早川怜子"]
+
+    def test_html_fallback_extracts_unlinked_actor_span(self, scraper):
+        """Caribbeancom 演員是無連結 spec__tag span 時也能解析。"""
+        html = """\
+<html><body>
+<h1>テストタイトル</h1>
+<ul class="movie-info">
+  <li class="movie-spec">
+    <span class="spec-title">出演</span>
+    <span class="spec-content">
+      <span class="spec__tag" itemprop="actor" itemscope itemtype="http://schema.org/Person">小早川怜子</span>
+    </span>
+  </li>
+</ul>
+</body></html>
+"""
+        scraper._session.get = MagicMock(
+            side_effect=[make_404_response(), make_404_response(), make_html_response(html)]
+        )
+
+        video = scraper.search("072220_001")
+
+        assert video is not None
+        assert [a.name for a in video.actresses] == ["小早川怜子"]
+
     def test_html_fallback_404(self, scraper):
         """JSON 404 + HTML 也 404 → 返回 None（continue 到下個 site）"""
         json_404 = make_404_response()

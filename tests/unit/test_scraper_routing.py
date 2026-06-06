@@ -58,10 +58,19 @@ def _mock_state(is_connected=True, base_url="http://mt:8080", token="tok",
 
 class TestStripInternalNfoKeys:
     def test_removes_summary_and_rating(self):
-        d = {'_source': 'javbus', '_summary': 'some text', '_rating': 4.5, 'title': 'T'}
+        d = {
+            '_source': 'javbus',
+            '_summary': 'some text',
+            '_rating': 4.5,
+            '_actress_aliases': {'Alice': ['A']},
+            '_actress_profiles': [{'name': 'Alice'}],
+            'title': 'T',
+        }
         result = strip_internal_nfo_keys(d)
         assert '_summary' not in result
         assert '_rating' not in result
+        assert '_actress_aliases' not in result
+        assert '_actress_profiles' not in result
 
     def test_keeps_source_mode_variant_ids(self):
         d = {'_source': 'javbus', '_mode': 'exact', '_all_variant_ids': ['a'], '_summary': 'x'}
@@ -83,6 +92,8 @@ class TestStripInternalNfoKeys:
     def test_constant_tuple_contents(self):
         assert '_summary' in _INTERNAL_NFO_KEYS
         assert '_rating' in _INTERNAL_NFO_KEYS
+        assert '_actress_aliases' in _INTERNAL_NFO_KEYS
+        assert '_actress_profiles' in _INTERNAL_NFO_KEYS
         assert '_source' not in _INTERNAL_NFO_KEYS
 
 
@@ -214,6 +225,21 @@ class TestExplicitDispatch:
             result = search_jav("ABF-001", source='metatube:FANZA')
 
         assert result is None
+
+    def test_explicit_theporndb_uses_raw_title_query(self, monkeypatch):
+        """ThePornDB title searches keep the raw title query before canonical fallback."""
+        monkeypatch.setattr("core.scraper._get_theporndb_token", lambda config=None: "token")
+        video = _make_video("theporndb", "tpdb-scene-1")
+
+        with patch("core.scraper.ThePornDBScraper") as MockScraper:
+            scraper = MockScraper.return_value
+            scraper.search.return_value = video
+            result = search_jav("Wicked Western Scene", source='theporndb')
+
+        MockScraper.assert_called_once_with(api_token="token")
+        scraper.search.assert_called_once_with("Wicked Western Scene")
+        assert result is not None
+        assert result['_source'] == 'theporndb'
 
 
 # ===========================================================================
@@ -414,6 +440,8 @@ class TestApiEchoStrip:
             '_mode': 'exact',
             '_summary': 'this must not appear',
             '_rating': 4.5,
+            '_actress_aliases': {'Alice': ['A']},
+            '_actress_profiles': [{'name': 'Alice'}],
             'number': 'ABF-001',
             'date': '2024-01-01',
         }
@@ -444,6 +472,8 @@ class TestApiEchoStrip:
         for item in items:
             assert '_summary' not in item, "_summary must not appear in API response"
             assert '_rating' not in item, "_rating must not appear in API response"
+            assert '_actress_aliases' not in item
+            assert '_actress_profiles' not in item
             # canonical keys also must not appear (to_legacy_dict excludes them, double check)
             assert 'summary' not in item
             assert 'rating' not in item
@@ -468,6 +498,8 @@ class TestApiEchoStrip:
         data = resp.json()
         assert '_summary' not in data, "_summary must not appear in rescrape/preview response"
         assert '_rating' not in data, "_rating must not appear in rescrape/preview response"
+        assert '_actress_aliases' not in data
+        assert '_actress_profiles' not in data
         assert 'summary' not in data
         assert 'rating' not in data
 

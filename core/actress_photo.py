@@ -41,6 +41,7 @@ CONTENT_TYPE_MAP: dict[str, str] = {
 REFERER_MAP: dict[str, str] = {
     "graphis": "https://www.graphis.ne.jp/",
     "gfriends": "https://github.com/gfriends/gfriends",
+    "javdb": "https://javdb.com/",
     "wiki": "https://ja.wikipedia.org/",
     "minnano": "https://www.minnano-av.com/",
 }
@@ -57,6 +58,9 @@ PHOTO_HOST_WHITELIST: dict[str, set] = {
         "raw.githubusercontent.com",
         "github.com",
     },
+    "javdb": {
+        "javdb.com",
+    },
     "wiki": {
         "upload.wikimedia.org",
         "ja.wikipedia.org",
@@ -64,6 +68,12 @@ PHOTO_HOST_WHITELIST: dict[str, set] = {
     "minnano": {
         "www.minnano-av.com",
         "minnano-av.com",
+    },
+}
+
+PHOTO_ROOT_DOMAIN_WHITELIST: dict[str, set] = {
+    "javdb": {
+        "jdbstatic.com",
     },
 }
 
@@ -80,8 +90,14 @@ def _validate_photo_url(photo_url: str, photo_source: str) -> bool:
         return False
     if parsed.scheme not in ("http", "https"):
         return False
+    host = (parsed.hostname or "").lower()
     allowed = PHOTO_HOST_WHITELIST.get(photo_source, set())
-    return parsed.hostname in allowed
+    if host in allowed:
+        return True
+    for root in PHOTO_ROOT_DOMAIN_WHITELIST.get(photo_source, set()):
+        if host == root or host.endswith(f".{root}"):
+            return True
+    return False
 
 
 def download_actress_photo(name: str, photo_url: str, photo_source: str) -> bool:

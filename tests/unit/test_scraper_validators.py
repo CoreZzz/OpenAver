@@ -19,6 +19,7 @@ from core.scraper import (
     is_prefix_only,
     search_jav,
 )
+from core.scrapers.models import Video
 
 
 class TestIsNumberFormat:
@@ -142,7 +143,9 @@ class TestIsPrefixOnly:
 # spies recording instantiation and stub .search() so nothing real runs.
 _SCRAPER_ATTRS = [
     'DMMScraper', 'JavBusScraper', 'JAV321Scraper', 'JavDBScraper',
+    'MissAVScraper',
     'D2PassScraper', 'HEYZOScraper', 'FC2Scraper', 'AVSOXScraper',
+    'ThePornDBScraper',
 ]
 
 # id -> scraper class attr name in core.scraper
@@ -151,10 +154,12 @@ _ID_TO_ATTR = {
     'javbus': 'JavBusScraper',
     'jav321': 'JAV321Scraper',
     'javdb': 'JavDBScraper',
+    'missav': 'MissAVScraper',
     'd2pass': 'D2PassScraper',
     'heyzo': 'HEYZOScraper',
     'fc2': 'FC2Scraper',
     'avsox': 'AVSOXScraper',
+    'theporndb': 'ThePornDBScraper',
 }
 
 
@@ -239,6 +244,106 @@ class TestAutoFanOutReadsEnabledIds:
         result = search_jav("ABP-001", source="auto")
         assert result is None
         assert all(v == 0 for v in constructed.values())
+
+
+class TestAutoFanOutQueryRouting:
+    """auto keeps the configured source pool broad but routes by query shape."""
+
+    def test_javdb_hit_short_circuits_auto_fanout(self, monkeypatch):
+        calls = []
+        javdb_video = Video(
+            number="SONE-205",
+            title="JavDB Title",
+            actresses=[],
+            source="javdb",
+        )
+
+        class _JavDB:
+            def search(self, number):
+                calls.append(("javdb", number))
+                return javdb_video
+
+        class _Other:
+            def __init__(self, source):
+                self.source = source
+
+            def search(self, number):
+                calls.append((self.source, number))
+                return None
+
+        monkeypatch.setattr(scraper_mod, 'normalize_number', lambda n: n)
+        monkeypatch.setattr(
+            scraper_mod,
+            'get_enabled_source_ids',
+            lambda availability_map=None: ['javbus', 'javdb', 'jav321'],
+        )
+        monkeypatch.setattr(scraper_mod, 'JavDBScraper', lambda *a, **k: _JavDB())
+        monkeypatch.setattr(scraper_mod, 'JavBusScraper', lambda *a, **k: _Other('javbus'))
+        monkeypatch.setattr(scraper_mod, 'JAV321Scraper', lambda *a, **k: _Other('jav321'))
+
+        result = search_jav("SONE-205", source="auto")
+
+        assert result is not None
+        assert result['_source'] == 'javdb'
+        assert calls == [('javdb', 'SONE-205')]
+
+    def test_censored_number_skips_uncensored_and_western_sources(self, monkeypatch):
+        constructed = _install_scraper_spies(monkeypatch)
+        monkeypatch.setattr(
+            scraper_mod,
+            'get_enabled_source_ids',
+            lambda availability_map=None: [
+                'dmm', 'javbus', 'jav321', 'javdb', 'missav',
+                'd2pass', 'heyzo', 'fc2', 'avsox', 'theporndb',
+            ],
+        )
+
+        search_jav("SONE-205", source="auto")
+
+        assert constructed['JavBusScraper'] == 1
+        assert constructed['JAV321Scraper'] == 1
+        assert constructed['JavDBScraper'] == 1
+        assert constructed['MissAVScraper'] == 1
+        for attr in ('D2PassScraper', 'HEYZOScraper', 'FC2Scraper', 'AVSOXScraper', 'ThePornDBScraper'):
+            assert constructed[attr] == 0
+
+    def test_fc2_number_routes_to_fc2_aggregators_only(self, monkeypatch):
+        constructed = _install_scraper_spies(monkeypatch)
+        monkeypatch.setattr(
+            scraper_mod,
+            'get_enabled_source_ids',
+            lambda availability_map=None: [
+                'dmm', 'javbus', 'jav321', 'javdb', 'missav',
+                'd2pass', 'heyzo', 'fc2', 'avsox', 'theporndb',
+            ],
+        )
+
+        search_jav("FC2PPV-1234567", source="auto")
+
+        assert constructed['JavDBScraper'] == 1
+        assert constructed['MissAVScraper'] == 1
+        assert constructed['FC2Scraper'] == 1
+        assert constructed['AVSOXScraper'] == 1
+        for attr in ('DMMScraper', 'JavBusScraper', 'JAV321Scraper', 'D2PassScraper', 'HEYZOScraper', 'ThePornDBScraper'):
+            assert constructed[attr] == 0
+
+    def test_western_title_routes_to_title_sources_only(self, monkeypatch):
+        constructed = _install_scraper_spies(monkeypatch)
+        monkeypatch.setattr(
+            scraper_mod,
+            'get_enabled_source_ids',
+            lambda availability_map=None: [
+                'dmm', 'javbus', 'jav321', 'javdb', 'missav',
+                'd2pass', 'heyzo', 'fc2', 'avsox', 'theporndb',
+            ],
+        )
+
+        search_jav("Blacked.16.12.26.Lena.Paul.And.Angela.White", source="auto")
+
+        assert constructed['JavDBScraper'] == 1
+        assert constructed['ThePornDBScraper'] == 1
+        for attr in ('DMMScraper', 'JavBusScraper', 'JAV321Scraper', 'MissAVScraper', 'D2PassScraper', 'HEYZOScraper', 'FC2Scraper', 'AVSOXScraper'):
+            assert constructed[attr] == 0
 
 
 class TestDmmProxyGuard:

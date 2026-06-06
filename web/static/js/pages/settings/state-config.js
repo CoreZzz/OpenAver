@@ -8,6 +8,7 @@ export function stateConfig() {
             // Search
             searchFavoriteFolder: '',
             proxyUrl: '',
+            thePornDbToken: '',
             sourceMode: 'enabled',
             customSourceIds: [],
             tryAllAliases: true,
@@ -112,7 +113,8 @@ export function stateConfig() {
         // ===== Constants =====
 
         // 來源分群常數（與 core/scrapers/utils.py 同步）
-        CENSORED_SOURCES: ['dmm', 'javbus', 'jav321', 'javdb'],
+        CENSORED_SOURCES: ['dmm', 'javbus', 'jav321', 'javdb', 'missav'],
+        UNCENSORED_SOURCES: ['d2pass', 'heyzo', 'fc2', 'avsox', 'theporndb'],
 
         get formatVariables() {
             return [
@@ -289,9 +291,13 @@ export function stateConfig() {
         // 讀 this.sources → Alpine 自動追蹤；點任一有碼 pill 重啟 → getter 反應性回 false（雙向 sync，無需 $watch）。
         // 與後端 is_uncensored_mode_effective 同口徑（all censored disabled），不加 POC 的「some uncensored enabled」條件以免 mirror 漂移。
         get allBuiltinEnabled() {
-            // builtin 共 8（< cap 10），不可用 enabledCount>=cap 判斷全開。
+            // builtin 數量會隨來源能力成長，不可用 enabledCount>=cap 判斷全開。
             // 空陣列 guard：sources=[] 時 every() vacuous true，須先確認長度>0。
-            const builtin = this.sources.filter(s => s.type === 'builtin' && !s.manual_only);
+            const builtin = this.sources.filter(s =>
+                s.type === 'builtin'
+                && !s.manual_only
+                && (s.id !== 'theporndb' || this.isThePornDbAvailable())
+            );
             return builtin.length > 0 && builtin.every(s => s.enabled);
         },
 
@@ -372,6 +378,16 @@ export function stateConfig() {
             return !!this.form.proxyUrl.trim();
         },
 
+        isThePornDbAvailable() {
+            return !!this.form.thePornDbToken.trim();
+        },
+
+        isSourceReady(src) {
+            if (src === 'dmm') return this.isDmmAvailable();
+            if (src === 'theporndb') return this.isThePornDbAvailable();
+            return true;
+        },
+
         /**
          * 來源是否啟用（決定 badge 亮度）
          * - 有碼來源：無碼模式關閉時啟用
@@ -379,19 +395,19 @@ export function stateConfig() {
          * - DMM：有碼模式 + proxy 有值才亮
          */
         isSourceActive(src) {
-            if (this.form.sourceMode === 'all') return src !== 'dmm' || this.isDmmAvailable();
+            if (this.form.sourceMode === 'all') return this.isSourceReady(src);
             if (this.form.sourceMode === 'custom') {
-                return this.form.customSourceIds.includes(src) && (src !== 'dmm' || this.isDmmAvailable());
+                return this.form.customSourceIds.includes(src) && this.isSourceReady(src);
             }
-            if (this.form.sourceMode === 'censored') return this.CENSORED_SOURCES.includes(src) && (src !== 'dmm' || this.isDmmAvailable());
-            if (this.form.sourceMode === 'uncensored') return this.UNCENSORED_SOURCES.includes(src);
+            if (this.form.sourceMode === 'censored') return this.isSourceReady(src);
+            if (this.form.sourceMode === 'uncensored') return this.isSourceReady(src);
 
             const configured = this.sources.find(s => s.id === src);
-            if (configured) return configured.enabled && (src !== 'dmm' || this.isDmmAvailable());
+            if (configured) return configured.enabled && this.isSourceReady(src);
 
             const isUncensored = this.UNCENSORED_SOURCES.includes(src);
             if (isUncensored) {
-                return this.uncensoredMode;
+                return this.uncensoredMode && this.isSourceReady(src);
             }
             if (src === 'dmm') {
                 return !this.uncensoredMode && !!this.form.proxyUrl.trim();
@@ -605,6 +621,8 @@ export function stateConfig() {
                             requires_proxy: s.requires_proxy ?? false,           // forward-compat for 63c-6
                         }))
                         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+                    const thePornDbSource = this.sources.find(s => s.id === 'theporndb');
+                    this.form.thePornDbToken = thePornDbSource?.config?.api_token || '';
 
                     // 建立初始快照（dirty check 基準）— 必須在解鎖前建立
                     this.savedState = JSON.parse(JSON.stringify(this.form));
@@ -773,17 +791,22 @@ export function stateConfig() {
 
                 // 更新 sources（61c-2）：序列化回後端 SourceConfig 欄位形狀。
                 // order 重算 = 當前陣列 index。is_censored 是後端 computed，**不回送**。
-                config.sources = this.sources.map((s, i) => ({
-                    id: s.id,
-                    type: s.type,
-                    display_name_key: s.type === 'builtin' ? s.display_name : (s.display_name_key || ''),
-                    display_name_raw: s.type === 'metatube' ? s.display_name : '',
-                    enabled: s.enabled,
-                    order: i,
-                    config: s.config || {},
-                    is_beta: s.is_beta,
-                    manual_only: s.manual_only,
-                }));
+                config.sources = this.sources.map((s, i) => {
+                    const sourceConfig = s.id === 'theporndb'
+                        ? { ...(s.config || {}), api_token: this.form.thePornDbToken.trim() }
+                        : (s.config || {});
+                    return {
+                        id: s.id,
+                        type: s.type,
+                        display_name_key: s.type === 'builtin' ? s.display_name : (s.display_name_key || ''),
+                        display_name_raw: s.type === 'metatube' ? s.display_name : '',
+                        enabled: s.enabled,
+                        order: i,
+                        config: sourceConfig,
+                        is_beta: s.is_beta,
+                        manual_only: s.manual_only,
+                    };
+                });
 
                 const resp = await fetch('/api/config', {
                     method: 'PUT',
@@ -968,6 +991,10 @@ export function stateConfig() {
         toggleBuiltin(id) {
             const s = this.sources.find(x => x.id === id);
             if (!s || s.type !== 'builtin') return;
+            if (id === 'theporndb' && !s.enabled && !this.isThePornDbAvailable()) {
+                this.showToast(window.t('settings.sources.theporndb_token_required'), 'warning');
+                return;
+            }
             if (!s.enabled && this.enabledCount >= MAX_ENABLED_SOURCES) {
                 this._flashCapAlert();
                 return;
@@ -1160,6 +1187,7 @@ export function stateConfig() {
             for (const s of this.sources) {
                 if (s.manual_only || s.enabled) continue;
                 if (s.type === 'metatube') continue;  // builtin first
+                if (s.id === 'theporndb' && !this.isThePornDbAvailable()) continue;
                 if (this.enabledCount >= MAX_ENABLED_SOURCES) break;
                 s.enabled = true;
             }

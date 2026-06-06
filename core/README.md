@@ -96,6 +96,7 @@ scrapers/
 **女優資料爬蟲**
 - Orchestrator 並行 4 路：Minnano-AV / Wikipedia JP / Graphis / gfriends
 - C1 text cascade：Minnano → Wiki → Graphis
+- C3 photo cascade：gfriends → Graphis → Wiki → Minnano
 - 供女優卡（Hero Card）功能使用
 - Phase 42e（2026-04-11）起不再使用 JavBus actress 路徑；影片 pipeline 的 `scrapers/javbus.py` 不受影響
 

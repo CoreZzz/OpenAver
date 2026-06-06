@@ -21,6 +21,8 @@ def _no_rate_limit(monkeypatch):
     """跳過 rate_limit / REQUEST_DELAY sleep，加速測試"""
     monkeypatch.setattr("core.scrapers.dmm.rate_limit", lambda *a, **kw: None)
     monkeypatch.setattr("core.scraper.time.sleep", lambda *a: None)
+    monkeypatch.setattr("core.scraper.MissAVScraper.search", lambda self, number: None)
+    monkeypatch.setattr("core.scraper.MissAVScraper.search_by_keyword", lambda self, keyword, limit=20: [])
 
 
 # ============================================================

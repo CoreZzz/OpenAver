@@ -308,6 +308,20 @@
                         </div>
                     </div>
 
+                    <div class="settings-form-row">
+                        <label class="row-label">
+                            {{ t('settings.sources.theporndb_token_label') }}
+                            <small class="settings-hint">{{ t('settings.sources.theporndb_token_hint') }}</small>
+                        </label>
+                        <div class="flex-1 flex flex-col gap-1">
+                            <input type="password"
+                                   class="input input-bordered input-sm flex-1"
+                                   x-model="form.thePornDbToken"
+                                   autocomplete="off"
+                                   placeholder="{{ t('settings.sources.theporndb_token_placeholder') }}">
+                        </div>
+                    </div>
+
                     <!-- Metatube 連線（B3）toggle（CD-63b-3）— 64b-6: 移至 Section 3 正上方 -->
                     <div class="settings-form-group">
                         <label class="settings-label">

@@ -18,14 +18,23 @@ from typing import Optional, List, Dict, Union, Any, Callable, Type
 # 引入新版爬蟲模組
 from core.scrapers import (
     JavBusScraper, JAV321Scraper, JavDBScraper,
+    MissAVScraper,
     FC2Scraper, AVSOXScraper,
     D2PassScraper, HEYZOScraper, DMMScraper,
+    ThePornDBScraper,
     Video, ScraperConfig, BaseScraper
 )
-from core.scrapers.utils import extract_number as _new_extract_number, FUZZY_SEARCH_SOURCES
+from core.scrapers.utils import (
+    extract_number as _new_extract_number,
+    FUZZY_SEARCH_SOURCES,
+    METATUBE_CENSORED,
+    METATUBE_DATE_UNCENSORED,
+    METATUBE_UNCENSORED,
+)
 from core.filename_identity import build_source_queries, parse_media_identity
-from core.maker_mapping import get_maker_by_prefix
+from core.maker_mapping import get_maker_by_prefix, load_prefix_mapping, normalize_maker_name
 from core.source_merger import merge_results
+from core.metadata_corrections import apply_metadata_overrides
 from core.source_config import validate_source_id
 from core.source_settings import get_enabled_source_ids, get_all_source_ids_ordered
 
@@ -46,7 +55,7 @@ REQUEST_DELAY = 0.3
 # explicit dispatch 已改用 SOURCE_TO_SCRAPER map。此常數目前已無呼叫者（dead），
 # 依 plan-61 61a-3 DoD 保留為 legacy/fallback 參照，不再是 search_jav() 的 routing 來源。
 SCRAPER_CLASSES: List[Type[BaseScraper]] = [
-    JavBusScraper, JAV321Scraper, JavDBScraper,
+    JavBusScraper, JAV321Scraper, JavDBScraper, MissAVScraper,
     FC2Scraper, AVSOXScraper,
     D2PassScraper, HEYZOScraper,
 ]
@@ -139,7 +148,7 @@ def expand_partial_number(partial: str) -> List[str]:
 
 # ============ 63c metatube internal carrier keys + strip helper ============
 
-_INTERNAL_NFO_KEYS = ('_summary', '_rating')
+_INTERNAL_NFO_KEYS = ('_summary', '_rating', '_actress_aliases', '_actress_profiles')
 
 
 def strip_internal_nfo_keys(result_dict: dict) -> dict:
@@ -208,6 +217,36 @@ def _dmm_proxy_url(proxy_url: str) -> str:
     return proxy_url
 
 
+def _get_theporndb_token(config: dict | None = None) -> str:
+    if config is None:
+        try:
+            config = load_config()
+        except Exception as exc:
+            logger.error("[Search] 讀取 ThePornDB 設定失敗: %s", exc)
+            return ""
+    for source in config.get("sources", []) or []:
+        if not isinstance(source, dict) or source.get("id") != "theporndb":
+            continue
+        cfg = source.get("config") if isinstance(source.get("config"), dict) else {}
+        return str(cfg.get("api_token") or cfg.get("token") or "").strip()
+    return ""
+
+
+def _is_theporndb_keyword_enabled() -> bool:
+    try:
+        config = load_config()
+    except Exception as exc:
+        logger.error("[Search] 讀取 ThePornDB 設定失敗: %s", exc)
+        return False
+    if not _get_theporndb_token(config):
+        return False
+    for source in config.get("sources", []) or []:
+        if not isinstance(source, dict) or source.get("id") != "theporndb":
+            continue
+        return bool(source.get("enabled")) and not bool(source.get("manual_only")) and not bool(source.get("is_beta"))
+    return False
+
+
 VALID_JAVBUS_LANGS = {'zh-tw', 'ja', 'en'}
 
 
@@ -233,8 +272,274 @@ def _search_query_options(raw_number: str, canonical_number: str) -> tuple:
     return identity, try_all_aliases, max_queries
 
 
+def _dedupe_queries(values: list[str]) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        query = str(value or "").strip()
+        if query and query not in out:
+            out.append(query)
+    return out
+
+
+def _date_style_exact_key(value: str) -> str:
+    text = str(value or "").strip().upper()
+    match = re.fullmatch(r"(\d{6})([-_])(\d{2,3})", text)
+    if not match:
+        return ""
+    return f"DATE:{match.group(1)}{match.group(2)}{match.group(3)}"
+
+
+_COMPACT_DISTINCT_PREFIXES = {"RED"}
+
+
+def _compact_distinct_exact_key(value: str) -> str:
+    text = str(value or "").strip().upper()
+    match = re.fullmatch(r"([A-Z]{2,7})([-_]?)(\d{2,5})", text)
+    if not match or match.group(1) not in _COMPACT_DISTINCT_PREFIXES:
+        return ""
+    separator = "COMPACT" if not match.group(2) else "SEPARATED"
+    return f"{separator}:{match.group(1)}{match.group(2)}{match.group(3)}"
+
+
+def _number_match_keys(value: str, source_id: str = "") -> set[str]:
+    identity = parse_media_identity(value)
+    candidates = [
+        str(value or "").strip(),
+        identity.canonical_number or "",
+        identity.search_number or "",
+        identity.display_number or "",
+        identity.raw_match or "",
+    ]
+    source = str(source_id or "").lower()
+    if source != "d2pass" or not _date_style_exact_key(identity.canonical_number or value):
+        candidates.extend(identity.number_aliases)
+
+    keys: set[str] = set()
+    for candidate in candidates:
+        text = str(candidate or "").strip().upper()
+        if not text:
+            continue
+        date_key = _date_style_exact_key(text)
+        if date_key:
+            keys.add(date_key)
+            continue
+        compact_distinct_key = _compact_distinct_exact_key(text)
+        if compact_distinct_key:
+            keys.add(compact_distinct_key)
+        else:
+            compact = re.sub(r"[^A-Z0-9]+", "", text)
+            if compact:
+                keys.add(compact)
+    return keys
+
+
+def _video_number(video) -> str:
+    if isinstance(video, dict):
+        return str(video.get("number") or "")
+    return str(getattr(video, "number", "") or "")
+
+
+def _video_maker(video) -> str:
+    if isinstance(video, dict):
+        return str(video.get("maker") or "")
+    return str(getattr(video, "maker", "") or "")
+
+
+def _identity_text_key(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
+_STRICT_PREFIX_MAKER_SOURCES = {"jav321"}
+
+
+def _video_matches_known_prefix_maker(video, identity, source_id: str) -> bool:
+    if str(source_id or "").lower() not in _STRICT_PREFIX_MAKER_SOURCES:
+        return True
+
+    number = str(getattr(identity, "canonical_number", "") or "")
+    match = re.match(r"^([A-Z]+)", number, flags=re.IGNORECASE)
+    if not match:
+        return True
+
+    expected = load_prefix_mapping().get(match.group(1).upper(), "")
+    actual = _video_maker(video)
+    if not expected or not actual:
+        return True
+
+    expected_key = _identity_text_key(normalize_maker_name(expected))
+    actual_key = _identity_text_key(normalize_maker_name(actual))
+    if not expected_key:
+        return True
+    if not actual_key:
+        return False
+    if expected_key == actual_key:
+        return True
+    if len(expected_key) >= 5 and expected_key in actual_key:
+        return True
+    if len(actual_key) >= 5 and actual_key in expected_key:
+        return True
+    return False
+
+
+def _video_matches_numbered_query(video, source_id: str, query: str,
+                                  canonical_number: str, identity) -> bool:
+    if not getattr(identity, "canonical_number", None):
+        return True
+
+    expected_keys = _number_match_keys(query, source_id)
+    if not expected_keys:
+        expected_keys = _number_match_keys(canonical_number, source_id)
+    actual_keys = _number_match_keys(_video_number(video), source_id)
+    if not (expected_keys and actual_keys and expected_keys & actual_keys):
+        return False
+    return _video_matches_known_prefix_maker(video, identity, source_id)
+
+
+_CENSORED_EXACT_BUILTINS = {"dmm", "javbus", "jav321", "javdb", "missav"}
+_FC2_EXACT_BUILTINS = {"fc2", "avsox", "javdb", "missav"}
+_HEYZO_EXACT_BUILTINS = {"heyzo", "avsox", "javdb", "missav"}
+_DATE_UNCENSORED_EXACT_BUILTINS = {"d2pass", "heyzo", "fc2", "avsox", "javdb", "missav"}
+_TITLE_EXACT_BUILTINS = {"theporndb", "javdb"}
+_FC2_METATUBE_PROVIDERS = {"fc2", "fc2ppvdb", "fc2hub"}
+_DATE_METATUBE_PROVIDERS = {p.lower() for p in METATUBE_DATE_UNCENSORED}
+_CENSORED_METATUBE_PROVIDERS = {p.lower() for p in METATUBE_CENSORED}
+_UNCENSORED_METATUBE_PROVIDERS = {p.lower() for p in METATUBE_UNCENSORED}
+_WESTERN_SITE_HINTS = {
+    "blacked",
+    "brazzers",
+    "deeper",
+    "digitalplayground",
+    "evilangel",
+    "mofos",
+    "naughtyamerica",
+    "private",
+    "realitykings",
+    "teamskeet",
+    "tushy",
+    "vixen",
+    "wicked",
+}
+
+
+def _query_kind(identity) -> str:
+    number = (getattr(identity, "canonical_number", None) or "").upper()
+    if not number:
+        return "title"
+    if number.startswith("FC2-PPV-"):
+        return "fc2"
+    if number.startswith("HEYZO-"):
+        return "heyzo"
+    if re.match(r"^\d{6}[-_]\d{2,3}$", number):
+        return "date_uncensored"
+    return "censored"
+
+
+def _metatube_provider_id(source_id: str) -> str:
+    if not source_id.startswith("metatube:"):
+        return ""
+    return source_id.split(":", 1)[1].strip().lower()
+
+
+def _source_allowed_for_query_kind(source_id: str, kind: str) -> bool:
+    if source_id.startswith("metatube:"):
+        provider = _metatube_provider_id(source_id)
+        if kind == "fc2":
+            return provider in _FC2_METATUBE_PROVIDERS
+        if kind == "heyzo":
+            return provider == "heyzo"
+        if kind == "date_uncensored":
+            return provider in _DATE_METATUBE_PROVIDERS
+        if kind == "title":
+            return False
+        # Unknown Metatube providers stay available for censored-style exact
+        # searches to preserve legacy custom provider behavior.
+        return provider in _CENSORED_METATUBE_PROVIDERS or provider not in _UNCENSORED_METATUBE_PROVIDERS
+
+    allowed = {
+        "censored": _CENSORED_EXACT_BUILTINS,
+        "fc2": _FC2_EXACT_BUILTINS,
+        "heyzo": _HEYZO_EXACT_BUILTINS,
+        "date_uncensored": _DATE_UNCENSORED_EXACT_BUILTINS,
+        "title": _TITLE_EXACT_BUILTINS,
+    }.get(kind, _CENSORED_EXACT_BUILTINS)
+    return source_id in allowed
+
+
+def _filter_auto_sources_for_query(enabled_sids: list[str], identity) -> list[str]:
+    """Keep source-mode broad, but route each query to compatible exact sources."""
+    kind = _query_kind(identity)
+    return [sid for sid in enabled_sids if _source_allowed_for_query_kind(sid, kind)]
+
+
+def _javdb_available_for_query(query: str) -> bool:
+    identity = parse_media_identity(query)
+    enabled_sids = get_enabled_source_ids(availability_map=metatube_state.availability_map())
+    return "javdb" in _filter_auto_sources_for_query(enabled_sids, identity)
+
+
+def _source_available_for_query(query: str, source_id: str) -> bool:
+    identity = parse_media_identity(query)
+    enabled_sids = get_enabled_source_ids(availability_map=metatube_state.availability_map())
+    return source_id in _filter_auto_sources_for_query(enabled_sids, identity)
+
+
+def _try_javdb_first(
+    query: str,
+    proxy_url: str = '',
+    status_callback: Optional[Callable[[str, str], None]] = None,
+) -> Optional[Dict[str, Any]]:
+    if not _javdb_available_for_query(query):
+        return None
+    if status_callback:
+        status_callback('javdb', 'searching')
+    return search_jav(query, source='javdb', proxy_url=proxy_url)
+
+
+def _try_missav_first(
+    query: str,
+    proxy_url: str = '',
+    status_callback: Optional[Callable[[str, str], None]] = None,
+) -> Optional[Dict[str, Any]]:
+    if not _source_available_for_query(query, "missav"):
+        return None
+    if status_callback:
+        status_callback('missav', 'searching')
+    return search_jav(query, source='missav', proxy_url=proxy_url)
+
+
+def _looks_western_title_query(query: str) -> bool:
+    text = str(query or "").strip()
+    if not text:
+        return False
+    if re.search(r"[\u3040-\u30ff\u3400-\u9fff]", text):
+        return False
+    tokens = [t.lower() for t in re.findall(r"[a-z0-9]+", text)]
+    if len(tokens) < 4:
+        return False
+    has_site = any(t in _WESTERN_SITE_HINTS for t in tokens)
+    has_scene_date = bool(re.search(r"(?<!\d)\d{2}[._ -]\d{2}[._ -]\d{2}(?!\d)", text))
+    return has_site or has_scene_date
+
+
 def _queries_for_source(identity, source_id: str, canonical_number: str,
+                        raw_number: str,
                         try_all_aliases: bool, max_queries: int) -> list[str]:
+    if source_id == "theporndb":
+        return _dedupe_queries([
+            raw_number,
+            getattr(identity, "raw_stem", ""),
+            canonical_number,
+        ])[:max_queries]
+    if source_id == "javdb" and not identity.canonical_number:
+        return _dedupe_queries([
+            raw_number,
+            getattr(identity, "raw_stem", ""),
+        ])[:max_queries]
+    if source_id == "missav" and not identity.canonical_number:
+        return _dedupe_queries([
+            raw_number,
+            getattr(identity, "raw_stem", ""),
+        ])[:max_queries]
     if try_all_aliases and identity.canonical_number:
         queries = build_source_queries(identity, source_id)
     else:
@@ -245,17 +550,79 @@ def _queries_for_source(identity, source_id: str, canonical_number: str,
 
 
 def _search_scraper_with_queries(scraper, source_id: str, canonical_number: str,
-                                 identity, try_all_aliases: bool, max_queries: int):
+                                 raw_number_or_identity,
+                                 identity=None, try_all_aliases: bool = True,
+                                 max_queries: int = 3):
+    if identity is None:
+        identity = raw_number_or_identity
+        raw_number = canonical_number
+    else:
+        raw_number = raw_number_or_identity
     for query in _queries_for_source(
-        identity, source_id, canonical_number, try_all_aliases, max_queries
+        identity, source_id, canonical_number, raw_number, try_all_aliases, max_queries
     ):
         video = scraper.search(query)
-        if video:
+        if video and _video_matches_numbered_query(video, source_id, query, canonical_number, identity):
             return video
+        if video:
+            logger.debug(
+                "[Search] rejected %s result for %s: returned number %s",
+                source_id,
+                query,
+                _video_number(video),
+            )
     return None
 
 
-def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_lang: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def _load_metadata_override_config() -> Optional[dict]:
+    try:
+        return load_config()
+    except Exception:
+        logger.warning("[Search] 載入 metadata_overrides 失敗")
+        return None
+
+
+def _override_only_search_result(raw_number: str, number: str) -> Optional[Dict[str, Any]]:
+    base: Dict[str, Any] = {
+        "number": number,
+        "title": "",
+        "actors": [],
+        "date": "",
+        "maker": "",
+        "cover": "",
+        "tags": [],
+        "source": "override",
+        "url": "",
+        "director": "",
+        "duration": None,
+        "label": "",
+        "series": "",
+        "sample_images": [],
+    }
+    result, override_fields = apply_metadata_overrides(
+        base,
+        [raw_number, number],
+        _load_metadata_override_config(),
+    )
+    if not override_fields:
+        return None
+    if not (result.get("title") or result.get("original_title")):
+        return None
+    if not result.get("date") and result.get("release_date"):
+        result["date"] = result["release_date"]
+    result["source"] = "override"
+    result["_source"] = "override"
+    result["_summary"] = ""
+    result["_rating"] = None
+    result["_actress_aliases"] = {}
+    result["_actress_profiles"] = []
+    result["_metadata_override_fields"] = override_fields
+    return result
+
+
+def search_jav(number: str, source: str = 'auto', proxy_url: str = '',
+               javbus_lang: Optional[str] = None,
+               _skip_sources: Optional[set[str]] = None) -> Optional[Dict[str, Any]]:
     """
     搜尋 JAV 資訊（向後相容函數）
     """
@@ -267,7 +634,7 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
     identity, try_all_aliases, max_queries = _search_query_options(raw_number, number)
 
     # 來源 id 驗證（TASK-61a-3）：改用 validate_source_id() 取代舊 VALID_SOURCES set。
-    # 'auto' 與 8 個 builtin id 通過；其餘 → return None（保留「未知來源不 raise」契約）。
+    # 'auto' 與 builtin id 通過；其餘 → return None（保留「未知來源不 raise」契約）。
     if not validate_source_id(source):
         logger.warning(f"[Search] 未知來源: {source}")
         return None
@@ -290,11 +657,13 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
         'dmm': lambda: [DMMScraper(dmm_config)] if dmm_config else [],
         'javbus': lambda: [JavBusScraper(lang=_javbus_lang)],
         'jav321': lambda: [JAV321Scraper()],
-        'javdb': lambda: [JavDBScraper()],
+        'javdb': lambda: [JavDBScraper(ScraperConfig(proxy_url=_dmm_proxy_url(proxy_url)))],
+        'missav': lambda: [MissAVScraper(ScraperConfig(proxy_url=_dmm_proxy_url(proxy_url)))],
         'd2pass': lambda: [D2PassScraper()],
         'heyzo': lambda: [HEYZOScraper()],
         'fc2': lambda: [FC2Scraper()],
         'avsox': lambda: [AVSOXScraper()],
+        'theporndb': lambda: [ThePornDBScraper(api_token=_get_theporndb_token())],
     }
 
     # 63c：動態注入 metatube provider（CD-63c-2）
@@ -321,10 +690,48 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
         # - 結果以 enabled_sids 順序重建 all_data（保全 user-drag merge 優先度）
         # get_enabled_source_ids 傳入 availability_map 讓 metatube gate 生效（🔴 CRITICAL）
         enabled_sids = get_enabled_source_ids(availability_map=metatube_state.availability_map())
+        enabled_sids = _filter_auto_sources_for_query(enabled_sids, identity)
+        skip_sources = set(_skip_sources or set())
+        if skip_sources:
+            enabled_sids = [sid for sid in enabled_sids if sid not in skip_sources]
         results_by_source: Dict[str, Video] = {}
         metatube_shims = []  # list of (sid, shim) for parallel dispatch
 
-        for sid in enabled_sids:
+        def run_builtin_source(sid: str) -> Optional[Video]:
+            factory = source_to_scraper.get(sid)
+            if not factory:
+                return None
+            found: Optional[Video] = None
+            for scraper in factory():
+                try:
+                    scraper_name = scraper.__class__.__name__
+                    logger.debug("[Search] trying %s...", scraper_name)
+                    v = _search_scraper_with_queries(
+                        scraper, sid, number, raw_number, identity, try_all_aliases, max_queries
+                    )
+                    if v:
+                        results_by_source[v.source] = v
+                        found = v
+                        logger.debug("[Search] %s found result", scraper_name)
+                        break
+                except Exception as e:
+                    logger.debug("[Search] %s error: %s", scraper_name, e)
+                    continue
+            return found
+
+        for priority_sid in ('javdb', 'missav'):
+            if priority_sid not in enabled_sids:
+                continue
+            priority_result = run_builtin_source(priority_sid)
+            if priority_result:
+                enabled_sids = [priority_sid]
+                break
+            enabled_sids = [sid for sid in enabled_sids if sid != priority_sid]
+
+        if results_by_source:
+            enabled_sids = [sid for sid in enabled_sids if sid in results_by_source]
+
+        for sid in ([] if results_by_source else enabled_sids):
             factory = source_to_scraper.get(sid)
             if not factory:
                 continue
@@ -336,7 +743,7 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
                         scraper_name = scraper.__class__.__name__
                         logger.debug(f"[Search] 嘗試 {scraper_name}...")
                         v = _search_scraper_with_queries(
-                            scraper, sid, number, identity, try_all_aliases, max_queries
+                            scraper, sid, number, raw_number, identity, try_all_aliases, max_queries
                         )
                         if v:
                             results_by_source[v.source] = v
@@ -356,6 +763,7 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
                             shim,
                             sid,
                             number,
+                            raw_number,
                             identity,
                             try_all_aliases,
                             max_queries,
@@ -389,7 +797,7 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
                 scraper_name = scraper.__class__.__name__
                 logger.debug(f"[Search] 嘗試 {scraper_name}...")
                 video = _search_scraper_with_queries(
-                    scraper, source, number, identity, try_all_aliases, max_queries
+                    scraper, source, number, raw_number, identity, try_all_aliases, max_queries
                 )
                 if video:
                     all_data[video.source] = video
@@ -399,6 +807,10 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
                 continue
 
     if not all_data:
+        override_result = _override_only_search_result(raw_number, number)
+        if override_result:
+            logger.info("[Search] %s 使用 metadata override", number)
+            return override_result
         logger.info(f"[Search] {number} 無結果")
         return None
 
@@ -421,9 +833,18 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '', javbus_la
             main_video = main_video.model_copy(update={'maker': maker})
 
     result = main_video.to_legacy_dict()
+    result, override_fields = apply_metadata_overrides(
+        result,
+        [raw_number, number, main_video.number],
+        _load_metadata_override_config(),
+    )
     result['_source'] = main_video.source  # 保留內部欄位
     result['_summary'] = main_video.summary  # 63c 新增（NFO 用，不入 DB，CD-63c-5）
     result['_rating'] = main_video.rating    # 63c 新增（NFO 用，已排除於 to_legacy_dict）
+    result['_actress_aliases'] = main_video.actress_aliases
+    result['_actress_profiles'] = main_video.actress_profiles
+    if override_fields:
+        result['_metadata_override_fields'] = override_fields
     logger.info(f"[Search] {number} 完成，來源: {main_video.source}")
     return result
 
@@ -694,7 +1115,7 @@ def _fuzzy_one(
     discovery_only semantics: only javbus has a stub-return mode; all other sources
     perform full enrichment and therefore must NOT participate when discovery_only=True.
     """
-    if discovery_only and source != 'javbus':
+    if discovery_only and source not in ('javbus', 'theporndb'):
         return []
 
     if source == 'dmm':
@@ -715,6 +1136,69 @@ def _fuzzy_one(
             query, limit, offset, status_callback, result_callback,
             discovery_only=discovery_only,
         )
+    if source == 'theporndb':
+        if status_callback:
+            status_callback('theporndb', 'searching')
+        scraper = ThePornDBScraper(api_token=_get_theporndb_token())
+        videos = scraper.search_by_keyword(query, limit=limit, offset=offset)
+        if discovery_only:
+            results = [
+                {'number': v.number, 'title': v.title, '_source': 'theporndb'}
+                for v in videos
+            ]
+            if status_callback:
+                status_callback('done', f'found:{len(results)}')
+            return results
+        results = []
+        for idx, video in enumerate(videos):
+            data = video.to_legacy_dict()
+            data['_source'] = 'theporndb'
+            data['_summary'] = video.summary
+            data['_rating'] = video.rating
+            data['_actress_aliases'] = video.actress_aliases
+            data['_actress_profiles'] = video.actress_profiles
+            results.append(data)
+            if result_callback:
+                result_callback(idx, data)
+        if status_callback:
+            status_callback('done', f'found:{len(results)}')
+        return results
+
+    if source == 'javdb':
+        if status_callback:
+            status_callback('javdb', 'searching')
+        scraper = JavDBScraper(ScraperConfig(proxy_url=_dmm_proxy_url(proxy_url)))
+        if _looks_western_title_query(query):
+            video = scraper.search(query)
+            videos = [video] if video else []
+        else:
+            videos = scraper.search_by_keyword(query, limit=limit)
+        results = []
+        for idx, video in enumerate(videos[:limit]):
+            data = video.to_legacy_dict()
+            data['_source'] = 'javdb'
+            results.append(data)
+            if result_callback:
+                result_callback(idx, data)
+        if status_callback:
+            status_callback('done', f'found:{len(results)}')
+        return results
+
+    if source == 'missav':
+        if status_callback:
+            status_callback('missav', 'searching')
+        scraper = MissAVScraper(ScraperConfig(proxy_url=_dmm_proxy_url(proxy_url)))
+        videos = scraper.search_by_keyword(query, limit=limit)
+        results = []
+        for idx, video in enumerate(videos[:limit]):
+            data = video.to_legacy_dict()
+            data['_source'] = 'missav'
+            results.append(data)
+            if result_callback:
+                result_callback(idx, data)
+        if status_callback:
+            status_callback('done', f'found:{len(results)}')
+        return results
 
     return []
 
@@ -735,11 +1219,22 @@ def _fuzzy_search_chain(
     actually-dispatched source (seed rule). Returns [] when chain is exhausted.
     """
     chain = [s for s in get_all_source_ids_ordered() if s in FUZZY_SEARCH_SOURCES]
+    if _looks_western_title_query(query):
+        chain = [s for s in chain if s in ('theporndb', 'javdb')]
+    for priority_sid in reversed(('javdb', 'missav')):
+        if priority_sid in chain:
+            chain = [priority_sid] + [s for s in chain if s != priority_sid]
     first_dispatched = False
     for source in chain:
         if source == 'dmm' and not _is_dmm_enabled(proxy_url):
             continue  # 不可達，跳過（不算 dispatched）
-        cb = result_callback if not first_dispatched else None
+        if source == 'theporndb' and not _is_theporndb_keyword_enabled():
+            continue
+        cb = result_callback if (
+            not first_dispatched
+            or source == 'javbus'
+            or (source == 'dmm' and chain[:1] == ['javdb'])
+        ) else None
         results = _fuzzy_one(
             source, query, limit, offset, proxy_url, status_callback, cb,
             discovery_only=discovery_only,
@@ -865,6 +1360,25 @@ def _get_uncensored_sources(search_term: str) -> list[str]:
     return mt_pick + builtin
 
 
+def _try_uncensored_exact_first(
+    query: str,
+    proxy_url: str = '',
+    status_callback: Optional[Callable[[str, str], None]] = None,
+) -> Optional[Dict[str, Any]]:
+    extracted = _new_extract_number(query)
+    if not extracted:
+        return None
+
+    for unc_source in _get_uncensored_sources(extracted):
+        if status_callback:
+            status_callback(unc_source, 'searching')
+        result = search_jav(extracted, source=unc_source, proxy_url=proxy_url)
+        if result:
+            result['_mode'] = 'uncensored'
+            return result
+    return None
+
+
 def smart_search(query: str, limit: int = 20, offset: int = 0, status_callback: Optional[Callable[[str, str], None]] = None, uncensored_mode: bool = False, proxy_url: str = '', result_callback: Optional[Callable[[int, Any], None]] = None, discovery_only: bool = False) -> List[Dict[str, Any]]:
     """
     智慧搜尋：自動判斷搜尋類型並執行
@@ -874,43 +1388,35 @@ def smart_search(query: str, limit: int = 20, offset: int = 0, status_callback: 
         limit: 結果數量限制
         offset: 分頁偏移
         status_callback: 狀態回調函數
-        uncensored_mode: 無碼模式（只搜 AVSOX / FC2）
+        uncensored_mode: 無碼提示模式（先試專用源，沒命中會繼續廣搜）
     """
     query = query.strip()
 
     if not query or len(query) < 2:
         return []
 
-    # 無碼模式：D2Pass → HEYZO → FC2 → AVSOX
-    #
-    # ⚠️ 設計語意（feature/65 CL-3 / CD-65-7）：無碼模式下對女優名/關鍵字做模糊搜尋
-    # **預期回空，此為設計而非 bug**。女優名經 _new_extract_number 取不到番號 → search_term
-    # 退回原字串 → 丟給只做精確番號查的無碼來源（D2Pass/HEYZO/FC2/AVSOX）→ 必然無命中 →
-    # 回空並於下方 return（永遠不會落到後面的模糊鏈 else 分支）。無碼番號命名無通則、模糊本
-    # 就難命中；維持「安靜回空」是真正零改動的選擇（接 AVSOX keyword 搜或改走有碼 always-on
-    # 反而要動更多 code，見 CD-65-7）。未來維護者勿把此處的空結果誤判為 bug。
+    # 無碼提示模式：D2Pass → HEYZO → FC2 → AVSOX 先試精確源。
+    # 沒命中時不中止；繼續走一般 fan-out / fuzzy，讓聚合源也有機會命中。
     if uncensored_mode:
         if status_callback:
             status_callback('mode', 'uncensored')
-
-        extracted = _new_extract_number(query)
-        search_term = extracted if extracted else query
-
-        result = None
-        unc_sources = _get_uncensored_sources(search_term)
-        for unc_source in unc_sources:
+        result = _try_javdb_first(query, proxy_url=proxy_url, status_callback=status_callback)
+        if result:
+            result['_mode'] = 'uncensored'
             if status_callback:
-                status_callback(unc_source, 'searching')
-            result = search_jav(search_term, source=unc_source, proxy_url=proxy_url)
-            if result:
-                break
-
-        results = [result] if result else []
-        if status_callback:
-            status_callback('done', f'found:{len(results)}')
-        for r in results:
-            r['_mode'] = 'uncensored'
-        return results
+                status_callback('done', 'found:1')
+            return [result]
+        result = _try_missav_first(query, proxy_url=proxy_url, status_callback=status_callback)
+        if result:
+            result['_mode'] = 'uncensored'
+            if status_callback:
+                status_callback('done', 'found:1')
+            return [result]
+        result = _try_uncensored_exact_first(query, proxy_url=proxy_url, status_callback=status_callback)
+        if result:
+            if status_callback:
+                status_callback('done', 'found:1')
+            return [result]
 
     # 0. 無碼特殊處理 - 自動偵測（FC2 / HEYZO / 日期-編號格式）
     is_uncensored = (
@@ -922,28 +1428,43 @@ def smart_search(query: str, limit: int = 20, offset: int = 0, status_callback: 
     if is_uncensored:
         if status_callback:
             status_callback('mode', 'uncensored')
-        extracted = _new_extract_number(query)
-        search_term = extracted if extracted else query
-        result = None
-        unc_sources = _get_uncensored_sources(search_term)
-        for unc_source in unc_sources:
+        result = _try_javdb_first(query, proxy_url=proxy_url, status_callback=status_callback)
+        if result:
+            result['_mode'] = 'uncensored'
             if status_callback:
-                status_callback(unc_source, 'searching')
-            result = search_jav(search_term, source=unc_source, proxy_url=proxy_url)
-            if result:
-                break
-        results = [result] if result else []
-        if status_callback:
-            status_callback('done', f'found:{len(results)}')
-        for r in results:
-            r['_mode'] = 'uncensored'
-        return results
+                status_callback('done', 'found:1')
+            return [result]
+        result = _try_missav_first(query, proxy_url=proxy_url, status_callback=status_callback)
+        if result:
+            result['_mode'] = 'uncensored'
+            if status_callback:
+                status_callback('done', 'found:1')
+            return [result]
+        result = _try_uncensored_exact_first(query, proxy_url=proxy_url, status_callback=status_callback)
+        if result:
+            if status_callback:
+                status_callback('done', 'found:1')
+            return [result]
 
     # 1. 精確搜尋
     if is_number_format(query):
         query = normalize_number(query)
         if offset > 0:
             return []
+
+        javdb_result = _try_javdb_first(query, proxy_url=proxy_url, status_callback=status_callback)
+        if javdb_result:
+            javdb_result['_mode'] = 'exact'
+            if status_callback:
+                status_callback('done', 'found:1')
+            return [javdb_result]
+
+        missav_result = _try_missav_first(query, proxy_url=proxy_url, status_callback=status_callback)
+        if missav_result:
+            missav_result['_mode'] = 'exact'
+            if status_callback:
+                status_callback('done', 'found:1')
+            return [missav_result]
 
         # Rule 4b（CD-61-19）：JavBus variant probe 僅在 JavBus 在 Active Row 啟用時觸發。
         # JavBus 停用 → 跳過 variant 探查 + 不發 javbus status（靜默降級），落一般 search_jav。
@@ -963,7 +1484,7 @@ def smart_search(query: str, limit: int = 20, offset: int = 0, status_callback: 
                     return [res]
 
         # 一般搜尋
-        res = search_jav(query, proxy_url=proxy_url)
+        res = search_jav(query, proxy_url=proxy_url, _skip_sources={'javdb', 'missav'})
         results = [res] if res else []
         if status_callback: status_callback('done', f'found:{len(results)}')
         for r in results: r['_mode'] = 'exact'

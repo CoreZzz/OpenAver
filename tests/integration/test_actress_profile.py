@@ -865,8 +865,7 @@ def _make_graphis_result(name="桜空もも", **overrides):
 
 def test_get_actress_profile_gfriends_wins():
     """gfriends 圖片勝出：graphis 無 prof_url 時，gfriends 應成為 photo cascade 的 winner。
-    T4.3 note: orchestrator photo cascade = graphis prof_url → gfriends → wiki → minnano.
-    To let gfriends win, graphis must have prof_url=None."""
+    T4.3 note: orchestrator photo cascade = gfriends → Graphis → Wiki → Minnano."""
     from core.scrapers.actress.orchestrator import get_actress_profile, _cache
 
     gfriends_url = 'https://cdn.jsdelivr.net/gh/gfriends/gfriends@master/Content/7-S1/桜空もも.jpg'
@@ -879,7 +878,7 @@ def test_get_actress_profile_gfriends_wins():
         result = get_actress_profile("桜空もも", makers=['S1'])
 
         assert result.data is not None
-        # gfriends wins photo cascade (graphis has no prof_url, javbus is ignored)
+        # gfriends wins photo cascade (javbus is ignored)
         assert result.data['img'] == gfriends_url
         # Backdrop still comes from graphis
         assert result.data['backdrop'] == 'https://graphis.ne.jp/model.jpg'

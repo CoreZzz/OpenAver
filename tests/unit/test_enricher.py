@@ -111,14 +111,16 @@ class TestFileNotFound:
 class TestEmptyNumber:
     def test_empty_number_returns_error(self):
         """邊界條件 2: number 為空字串"""
-        with patch("os.path.exists", return_value=True):
+        with patch("os.path.exists", return_value=True), \
+             patch("core.enricher.search_jav", return_value=None) as mock_search:
             from core.enricher import enrich_single
             result = enrich_single(
                 file_path=FS_PATH,
                 number="",
             )
         assert result.success is False
-        assert "番號" in result.error
+        mock_search.assert_called_once()
+        assert "SONE-205" in result.error
 
 
 # ── 3. mode 不合法 ────────────────────────────────────────────────────────────
@@ -233,6 +235,40 @@ class TestFillMissingDbMissingFields:
 
 
 # ── 6. fill_missing: DB miss + NFO 存在 ──────────────────────────────────────
+
+class TestFillMissingCoverMissing:
+    def test_db_complete_but_missing_cover_calls_scraper_for_cover(self):
+        video = _make_video(cover_path="")
+        scraper_data = _make_scraper_result(cover="https://example.com/new-cover.jpg")
+
+        def exists_side_effect(path):
+            return str(path) == FS_PATH
+
+        with (
+            patch("os.path.exists", side_effect=exists_side_effect),
+            patch("core.enricher.VideoRepository") as mock_repo_cls,
+            patch("core.enricher.search_jav", return_value=scraper_data) as mock_search,
+            patch("core.enricher.generate_nfo", return_value=True),
+            patch("core.enricher.download_image", return_value=True) as mock_download,
+            patch("core.enricher._ensure_parent"),
+        ):
+            mock_repo = MagicMock()
+            mock_repo_cls.return_value = mock_repo
+            mock_repo.get_by_path.return_value = video
+            mock_repo.get_by_numbers.return_value = {"SONE-205": [video]}
+
+            from core.enricher import enrich_single
+            result = enrich_single(
+                file_path=FS_PATH,
+                number="SONE-205",
+                mode="fill_missing",
+            )
+
+        assert result.success is True
+        mock_search.assert_called_once()
+        mock_download.assert_called_once()
+        assert mock_download.call_args.args[0] == "https://example.com/new-cover.jpg"
+
 
 class TestFillMissingDbMissNfoExists:
     def test_db_miss_nfo_exists_reads_nfo(self):
@@ -944,6 +980,61 @@ class TestDbUpsertCoverPath:
 
 
 # ── 28. F2: has_subtitle 由 find_subtitle_files 決定 ────────────────────────────
+
+    def test_preserves_existing_non_empty_fields_when_scraper_returns_empty(self):
+        from core.enricher import _db_upsert
+
+        captured = []
+        mock_repo = MagicMock()
+        mock_repo.upsert.side_effect = lambda v: captured.append(v)
+        existing = _make_video(
+            title="Keep Title",
+            original_title="Keep Original",
+            actresses=["Actor A"],
+            maker="Keep Maker",
+            director="Keep Director",
+            series="Keep Series",
+            label="Keep Label",
+            tags=["Keep Tag"],
+            duration=88,
+            cover_path=to_file_uri("C:/lib/SONE-205/cover.jpg"),
+            release_date="2020-01-01",
+        )
+        mock_repo.get_by_path.return_value = existing
+
+        _db_upsert(
+            mock_repo,
+            "SONE-205",
+            "/video/SONE-205.mp4",
+            {
+                "title": "",
+                "original_title": "",
+                "actresses": [],
+                "maker": "",
+                "director": "",
+                "series": "",
+                "label": "",
+                "tags": [],
+                "duration": None,
+                "cover_url": "",
+                "release_date": "",
+            },
+        )
+
+        assert len(captured) == 1
+        video = captured[0]
+        assert video.title == "Keep Title"
+        assert video.original_title == "Keep Original"
+        assert video.actresses == ["Actor A"]
+        assert video.maker == "Keep Maker"
+        assert video.director == "Keep Director"
+        assert video.series == "Keep Series"
+        assert video.label == "Keep Label"
+        assert video.tags == ["Keep Tag"]
+        assert video.duration == 88
+        assert video.cover_path == to_file_uri("C:/lib/SONE-205/cover.jpg")
+        assert video.release_date == "2020-01-01"
+
 
 class TestHasSubtitleDetected:
     def test_has_subtitle_true_when_srt_exists(self):

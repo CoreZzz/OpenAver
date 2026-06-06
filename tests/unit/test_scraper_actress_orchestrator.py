@@ -172,7 +172,7 @@ class TestHappyPath:
         assert result.data["text"] == minnano
         assert result.timed_out is False
 
-    def test_photo_cascade_graphis_wins(self):
+    def test_photo_cascade_gfriends_wins(self):
         minnano = _make_minnano()
         wiki    = _make_wiki()
         graphis = _make_graphis()
@@ -184,8 +184,8 @@ class TestHappyPath:
              patch(_PATCH_GFRIENDS, return_value=gfurl):
             result = get_actress_profile(_ACTRESS_NAME)
 
-        assert result.data["photo_source"] == "graphis"
-        assert result.data["photo_url"] == graphis["prof_url"]
+        assert result.data["photo_source"] == "gfriends"
+        assert result.data["photo_url"] == gfurl
         assert result.data["backdrop_url"] == graphis["backdrop_url"]
         assert result.timed_out is False
 
@@ -242,8 +242,8 @@ class TestC1Cascade:
         assert result.data["primary_text_source"] == "wiki"
         assert result.data["text"] == wiki
         assert result.data["name"] == wiki["name_ja"]
-        # Photo cascade: Graphis still wins because it has prof_url
-        assert result.data["photo_source"] == "graphis"
+        # Photo cascade: gfriends wins when available, even if Graphis has prof_url
+        assert result.data["photo_source"] == "gfriends"
         assert result.timed_out is False
 
     def test_minnano_wiki_none_graphis_wins(self):
@@ -285,10 +285,9 @@ class TestC1Cascade:
 
 class TestPhotoCascade:
 
-    def test_graphis_no_prof_url_gfriends_wins(self):
+    def test_gfriends_wins_over_graphis_prof_url(self):
         minnano = _make_minnano()
-        # Graphis present but prof_url missing/empty
-        graphis = _make_graphis(prof_url="")
+        graphis = _make_graphis()
         gfurl   = _make_gfriends_url()
 
         with patch(_PATCH_MINNANO, return_value=minnano), \
@@ -302,7 +301,22 @@ class TestPhotoCascade:
         assert result.data["img"] == gfurl
         assert result.timed_out is False
 
-    def test_graphis_none_gfriends_none_wiki_wins(self):
+    def test_gfriends_none_graphis_wins(self):
+        minnano = _make_minnano()
+        graphis = _make_graphis()
+
+        with patch(_PATCH_MINNANO, return_value=minnano), \
+             patch(_PATCH_WIKI, return_value=None), \
+             patch(_PATCH_GRAPHIS, return_value=graphis), \
+             patch(_PATCH_GFRIENDS, return_value=None):
+            result = get_actress_profile(_ACTRESS_NAME)
+
+        assert result.data["photo_source"] == "graphis"
+        assert result.data["photo_url"] == graphis["prof_url"]
+        assert result.data["img"] == graphis["prof_url"]
+        assert result.timed_out is False
+
+    def test_gfriends_none_graphis_none_wiki_wins(self):
         wiki = _make_wiki()
 
         with patch(_PATCH_MINNANO, return_value=None), \

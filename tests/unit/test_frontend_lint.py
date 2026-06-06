@@ -2405,6 +2405,9 @@ class TestMissingEnrichConfirmGuard:
         body = self._extract_function_body(js, "runMissingEnrich")
         assert "/api/gallery/missing-enrich/start" in body
         assert "/api/batch-enrich" not in body
+        assert "/api/capabilities" not in body
+        assert "/api/openai" not in body
+        assert "codex" not in body.lower()
         assert "startMissingEnrichPolling()" in body
         assert "AbortController" not in body
 

@@ -8,7 +8,7 @@ from core.logger import get_logger
 logger = get_logger(__name__)
 from lxml import etree
 from .base import BaseScraper
-from .models import Video, Actress, ScraperConfig
+from .models import Video, ScraperConfig
 from .utils import rate_limit
 
 
@@ -71,18 +71,51 @@ class FC2Scraper(BaseScraper):
         result = html.xpath("//h1/text()")
         return result[0].strip() if result else ""
 
+    def _absolute_url(self, url: str) -> str:
+        url = str(url or "").strip()
+        return f"https:{url}" if url.startswith("//") else url
+
+    def _downloadable_image_url(self, url: str) -> str:
+        """Convert FC2 raw storage images into the public thumbnail endpoint."""
+        url = self._absolute_url(url)
+        if re.match(r"^https?://storage\d+\.contents\.fc2\.com/file/", url):
+            storage_path = re.sub(r"^https?://", "", url)
+            return f"https://contents-thumbnail2.fc2.com/w1000/{storage_path}"
+        return url
+
+    def _fc2_storage_images(self, html) -> list[str]:
+        urls: list[str] = []
+        for url in html.xpath("//img/@src"):
+            text = self._absolute_url(url)
+            if re.match(r"^https?://storage\d+\.contents\.fc2\.com/file/", text):
+                urls.append(self._downloadable_image_url(text))
+        return urls
+
+    def _dedupe_urls(self, urls: list[str]) -> list[str]:
+        out: list[str] = []
+        for url in urls:
+            text = str(url or "").strip()
+            if text and text not in out:
+                out.append(text)
+        return out
+
     def _get_cover(self, html) -> str:
         """取得封面"""
+        storage_images = self._fc2_storage_images(html)
+        if storage_images:
+            return storage_images[0]
+
         result = html.xpath('//a[@data-fancybox="gallery"]/@href')
         if result:
-            url = result[0]
-            return f"https:{url}" if url.startswith("//") else url
+            return self._downloadable_image_url(result[0])
         return ""
 
     def _get_extrafanart(self, html) -> list[str]:
         """取得額外劇照"""
         result = html.xpath('//div[@style="padding: 0"]/a/@href')
-        return [f"https:{u}" if u.startswith("//") else u for u in result]
+        urls = [self._downloadable_image_url(u) for u in result]
+        urls.extend(self._fc2_storage_images(html))
+        return self._dedupe_urls(urls)
 
     def _get_studio(self, html) -> str:
         """取得賣家（作為片商）"""
@@ -179,13 +212,10 @@ class FC2Scraper(BaseScraper):
             # 移除無修正標籤（已用其他方式表示）
             tags = [t for t in tags if t not in ["無修正", "无修正"]]
 
-            # FC2 沒有女優資訊，可用賣家名替代
-            actresses = [Actress(name=studio)] if studio else []
-
             video = Video(
                 number=f"FC2-{fc2_number}",
                 title=title,
-                actresses=actresses,
+                actresses=[],
                 date="",  # FC2Hub 沒有發售日期
                 maker=studio,
                 cover_url=cover_url,

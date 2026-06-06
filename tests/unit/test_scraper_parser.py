@@ -290,6 +290,9 @@ class TestIsNumberFormat:
         """無橫線 ABC123"""
         assert is_number_format('ABC123') is True
 
+    def test_single_letter_n_number(self):
+        assert is_number_format('N0808') is True
+
     def test_lowercase(self):
         """小寫 sone-103"""
         assert is_number_format('sone-103') is True

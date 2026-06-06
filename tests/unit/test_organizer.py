@@ -1145,6 +1145,23 @@ class TestDownloadImage:
         assert result is False
         assert not save_path.exists()
 
+    @patch("core.organizer.requests.get")
+    def test_download_pacopacomama_uses_caribbean_referer(self, mock_get, tmp_path):
+        mock_resp = mock_get.return_value
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "image/jpeg"}
+        mock_resp.content = b"x" * 1200
+
+        save_path = tmp_path / "cover.jpg"
+        result = download_image(
+            "https://www.pacopacomama.com/assets/sample/072220_001/l_hd.jpg",
+            str(save_path),
+        )
+
+        assert result is True
+        headers = mock_get.call_args.kwargs["headers"]
+        assert headers["Referer"] == "https://www.caribbeancom.com/"
+
 
 # ============ generate_nfo() 新欄位測試 (T5b) ============
 

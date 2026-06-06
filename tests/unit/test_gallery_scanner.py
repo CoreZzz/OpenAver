@@ -203,6 +203,53 @@ class TestGalleryScanner:
         assert info.img == to_file_uri(str(cover_path))
         assert info.sample_images == [to_file_uri(str(sample_path))]
 
+    def test_scan_file_discovers_centralized_sidecar_when_metadata_maker_is_wrong(self, tmp_path):
+        media_dir = tmp_path / "media"
+        media_dir.mkdir()
+        video_path = media_dir / "ABC-123-C.mp4"
+        video_path.touch()
+
+        root = tmp_path / "Metadata"
+        base_dir = root / "Real Studio" / "ABC-123"
+        base_dir.mkdir(parents=True)
+        nfo_path = base_dir / "ABC-123.nfo"
+        cover_path = base_dir / "cover.jpg"
+        nfo_path.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+            <movie>
+                <title>Real Title</title>
+                <num>ABC-123</num>
+                <maker>Real Studio</maker>
+                <thumb>cover.jpg</thumb>
+            </movie>
+            """,
+            encoding="utf-8",
+        )
+        cover_path.write_bytes(b"cover")
+
+        scanner = VideoScanner(sidecar_config={
+            "sidecar": {
+                "mode": "centralized",
+                "root_dir": str(root),
+                "layout": "{maker}/{num}",
+                "nfo_filename": "{num}.nfo",
+                "cover_filename": "cover.jpg",
+            }
+        })
+
+        info = scanner.scan_file(
+            str(video_path),
+            metadata={"number": "ABC-123", "maker": "Wrong Studio"},
+        )
+
+        assert info.title == "Real Title"
+        assert info.maker == "Real Studio"
+        assert info.img == to_file_uri(str(cover_path))
+        assert scanner.sidecar_nfo_mtime(
+            video_path,
+            {"number": "ABC-123", "maker": "Wrong Studio"},
+        ) == nfo_path.stat().st_mtime
+
 
 # ============ NUM_PATTERNS 多字母後綴 ============
 

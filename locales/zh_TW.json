@@ -248,7 +248,11 @@
       "mt_probe_hint_reason3": "該來源的 metatube scraper 已隨網站改版失效（如 JAV321 / KIN8，與你的環境無關）。",
       "mt_promote_unavailable_warning": "此來源目前測不到，已加入主力集但可能抓不到資料",
       "mt_probe_failed_pill_hint": "此來源目前測不到，加入後可能抓不到資料，可先點「重新測試」確認",
-      "dmm_proxy_required_hint": "DMM 需要 proxy 才能使用，請先在設定中開啟代理"
+      "dmm_proxy_required_hint": "DMM 需要 proxy 才能使用，請先在設定中開啟代理",
+      "theporndb_token_label": "ThePornDB Token",
+      "theporndb_token_hint": "用於歐美片名、女優、別名、標籤與封面資料；只保存在本機設定中。",
+      "theporndb_token_placeholder": "Bearer token",
+      "theporndb_token_required": "請先填入 ThePornDB Token"
     },
     "advanced_search": {
       "toggle_label": "進階搜尋",
@@ -830,6 +834,7 @@
         "source_local_crop": "本機",
         "source_graphis": "Graphis",
         "source_gfriends": "gfriends",
+        "source_javdb": "JavDB",
         "source_wiki": "Wiki",
         "source_minnano": "Minnano"
       }

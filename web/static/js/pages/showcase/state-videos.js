@@ -10,6 +10,7 @@ import { _videos, _filteredVideos, _nameToGroup, _tagToGroup, _setVideos, _setFi
 
 export function stateVideos() {
     return {
+        _metadataSearchContext: null,
 
         // --- API 呼叫 ---
         async fetchVideos() {
@@ -75,6 +76,7 @@ export function stateVideos() {
 
         // --- 互動邏輯 ---
         onSearchChange() {
+            this._clearMetadataSearchContext();
             // B8: 透過 _animateFilter 觸發篩選動畫
             this._animateFilter();
             var trimmed = this.search.trim();
@@ -103,6 +105,76 @@ export function stateVideos() {
             return this.showFavoriteActresses
                 ? document.querySelector('.actress-grid')
                 : document.querySelector('.showcase-grid');
+        },
+
+        _setMetadataSearchContext(term, type) {
+            var normalized = (term || '').trim();
+            if (normalized && (type === 'actress' || type === 'tag')) {
+                this._metadataSearchContext = { term: normalized, type: type };
+            } else {
+                this._metadataSearchContext = null;
+            }
+        },
+
+        _clearMetadataSearchContext() {
+            this._metadataSearchContext = null;
+        },
+
+        _isMetadataExactSearch(searchText) {
+            var ctx = this._metadataSearchContext;
+            return !!ctx
+                && (ctx.type === 'actress' || ctx.type === 'tag')
+                && ctx.term === searchText;
+        },
+
+        _splitMetadataValues(value) {
+            if (!value) return [];
+            if (Array.isArray(value)) {
+                return value.map(function(v) { return String(v || '').trim(); }).filter(Boolean);
+            }
+            return String(value).split(',').map(function(v) { return v.trim(); }).filter(Boolean);
+        },
+
+        _matchesExactActress(video, term) {
+            var key = term.toLowerCase();
+            var targetNames = (_nameToGroup[key] || [term]).map(function(n) {
+                return String(n || '').toLowerCase();
+            });
+            var names = this._splitMetadataValues(video.actresses).map(function(n) {
+                return n.toLowerCase();
+            });
+            return targetNames.some(function(n) { return names.indexOf(n) !== -1; });
+        },
+
+        _matchesExactTag(video, term) {
+            var key = term.toLowerCase();
+            var targetTags = (_tagToGroup[key] || [term]).map(function(t) {
+                return String(t || '').toLowerCase();
+            });
+            var values = []
+                .concat(this._splitMetadataValues(video.tags))
+                .concat(this._splitMetadataValues(video.user_tags))
+                .concat([
+                    video.directory_label,
+                    this.directoryLabelText(video.directory_label),
+                ])
+                .concat(this.directorySearchLabels(video.directory_label))
+                .concat(this.variantSearchLabels(video));
+
+            (video.files || []).forEach((file) => {
+                values = values
+                    .concat([
+                        file.directory_label,
+                        this.directoryLabelText(file.directory_label),
+                    ])
+                    .concat(this.directorySearchLabels(file.directory_label))
+                    .concat(this.variantSearchLabels(file));
+            });
+
+            var normalized = values
+                .map(function(v) { return String(v || '').trim().toLowerCase(); })
+                .filter(Boolean);
+            return targetTags.some(function(t) { return normalized.indexOf(t) !== -1; });
         },
 
         /**
@@ -324,6 +396,18 @@ export function stateVideos() {
         applyFilterAndSort(skipPagination) {
             // --- 搜尋篩選 (M4a) ---
             if (this.search && this.search.trim()) {
+                var searchText = this.search.trim();
+                if (this._isMetadataExactSearch(searchText)) {
+                    var exactType = this._metadataSearchContext.type;
+                    var exactFiltered = _videos.filter(video => {
+                        if (exactType === 'actress') {
+                            return this._matchesExactActress(video, searchText);
+                        }
+                        return this._matchesExactTag(video, searchText);
+                    });
+                    _setFilteredVideos(exactFiltered);
+                    this.filteredCount = _filteredVideos.length;
+                } else {
                 // 分割多個關鍵字（用空格分隔，過濾空字串）
                 const terms = this.search.toLowerCase().trim().split(/\s+/).filter(t => t.length > 0);
 
@@ -380,7 +464,9 @@ export function stateVideos() {
                 });
                 _setFilteredVideos(filtered);
                 this.filteredCount = _filteredVideos.length;
+                }
             } else {
+                this._clearMetadataSearchContext();
                 // 空搜尋：回傳全部影片
                 _setFilteredVideos(_videos);
                 this.filteredCount = _filteredVideos.length;

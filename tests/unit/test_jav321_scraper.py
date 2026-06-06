@@ -157,6 +157,90 @@ MAKER_PLAIN_TEXT_HTML = """\
 # Full fields HTML — used for verifying existing fields are unchanged
 EXISTING_FIELDS_HTML = FULL_FIELDS_HTML
 
+HEADING_MISMATCH_HTML = """\
+<html><body>
+<a href="/video/pred-002">PRED-002</a>
+<h3>Wrong returned title <small>pred-002 Actor Name</small></h3>
+<div class="panel-body">
+  <div class="row">
+    <div class="col-md-3"><img class="img-responsive" src="http://pics.dmm.co.jp/digital/video/pred00002/pred00002ps.jpg"></div>
+    <div class="col-md-9">
+      <b>メーカー</b>: <a href="/company/alpha/1">Alpha International</a><br>
+      <b>品番</b>: pred-002<br>
+      <b>配信開始日</b>: 2006-05-12<br>
+    </div>
+  </div>
+</div>
+</body></html>
+"""
+
+SHORT_NUMBER_COLLISION_HTML = """\
+<html><body>
+<a href="/video/js-19">JS-19</a>
+<h3>Wrong returned title <small>js-019 Actor Name</small></h3>
+<div class="panel-body">
+  <div class="row">
+    <div class="col-md-3"><img class="img-responsive" src="http://pics.dmm.co.jp/digital/video/js00019/js00019ps.jpg"></div>
+    <div class="col-md-9">
+      <b>品番</b>: js-019<br>
+      <b>配信開始日</b>: 2014-03-10<br>
+    </div>
+  </div>
+</div>
+</body></html>
+"""
+
+TITLE_FIRST_EXACT_HTML = """\
+<html><body>
+<a href="/video/sone-205">SONE-205</a>
+<h3>Normal returned title <small>sone-205 Actor Name</small></h3>
+<div class="panel-body">
+  <div class="row">
+    <div class="col-md-3"><img class="img-responsive" src="http://pics.dmm.co.jp/digital/video/sone00205/sone00205ps.jpg"></div>
+    <div class="col-md-9">
+      <b>品番</b>: sone-205<br>
+      <b>配信開始日</b>: 2024-01-01<br>
+    </div>
+  </div>
+</div>
+</body></html>
+"""
+
+RED_TITLE_SMALL_HTML = """\
+<html><body>
+<a href="/video/red00155">RED-155</a>
+<h3>ローション使ってパイズリして下さい。33人 <small>red-155</small></h3>
+<div class="panel-body">
+  <div class="row">
+    <div class="col-md-3"><img class="img-responsive" src="http://pics.dmm.co.jp/digital/video/red00155/red00155ps.jpg"></div>
+    <div class="col-md-9">
+      <b>メーカー</b>: <a href="/company/red/1">レッド</a><br>
+      <b>品番</b>: red-155<br>
+      <b>配信開始日</b>: 2002-07-02<br>
+      <b>収録時間</b>: 45 minutes<br>
+    </div>
+  </div>
+</div>
+</body></html>
+"""
+
+PRODUCT_NUMBER_MISMATCH_HTML = """\
+<html><body>
+<a href="/video/pred-002">PRED-002</a>
+<h3>Unrelated title <small>pred-002 Actor Name</small></h3>
+<div class="panel-body">
+  <div class="row">
+    <div class="col-md-3"><img class="img-responsive" src="http://pics.dmm.co.jp/digital/video/pred00002/pred00002ps.jpg"></div>
+    <div class="col-md-9">
+      <b>メーカー</b>: <a href="/company/premium/1">プレミアム</a><br>
+      <b>品番</b>: red-155<br>
+      <b>配信開始日</b>: 2006-05-12<br>
+    </div>
+  </div>
+</div>
+</body></html>
+"""
+
 
 # ============================================================
 # Fixtures
@@ -194,12 +278,45 @@ class TestFullFields:
     def test_search_full_fields(self, scraper):
         video = run_search(scraper, FULL_FIELDS_HTML)
         assert video is not None
+        assert video.title == "タイトル"
         assert video.maker == "Fitch"
         assert video.duration == 147
         assert video.series == "究極の爆乳密写シコシコサポート"
         assert len(video.sample_images) == 2
         assert "jufd00851jp-1.jpg" in video.sample_images[0]
         assert "jufd00851jp-2.jpg" in video.sample_images[1]
+
+
+class TestHeadingMismatch:
+    """JAV321 fuzzy direct detail pages must not be accepted as exact matches."""
+
+    def test_rejects_known_prefix_maker_collision(self, scraper):
+        video = run_search(scraper, HEADING_MISMATCH_HTML, "PRED-002")
+        assert video is None
+
+    def test_rejects_short_number_collision(self, scraper):
+        video = run_search(scraper, SHORT_NUMBER_COLLISION_HTML, "JS-19")
+        assert video is None
+
+    def test_accepts_title_first_exact_displayed_number(self, scraper):
+        video = run_search(scraper, TITLE_FIRST_EXACT_HTML, "SONE-205")
+        assert video is not None
+        assert video.number == "SONE-205"
+        assert video.title == "Normal returned title"
+
+    def test_rejects_when_structured_product_number_differs(self, scraper):
+        video = run_search(scraper, PRODUCT_NUMBER_MISMATCH_HTML, "PRED-002")
+        assert video is None
+
+    def test_removes_small_number_suffix_from_title(self, scraper):
+        video = run_search(scraper, RED_TITLE_SMALL_HTML, "RED-155")
+        assert video is not None
+        assert video.number == "RED-155"
+        assert video.title == "ローション使ってパイズリして下さい。33人"
+
+    def test_rejects_hyphenated_red_for_compact_red(self, scraper):
+        video = run_search(scraper, RED_TITLE_SMALL_HTML, "RED155")
+        assert video is None
 
 
 class TestNoSeries:

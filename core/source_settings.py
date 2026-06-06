@@ -48,8 +48,7 @@ def get_enabled_source_ids(
 
     Phase 1.5 source_mode:
     - enabled（預設）：沿用舊行為，只取 enabled=True。
-    - censored：取有碼來源（不要求 enabled=True）。
-    - uncensored：取無碼來源（不要求 enabled=True）。
+    - censored/uncensored：相容舊 UI 的廣搜模式；不再依有码/无码分組硬切來源。
     - all：取所有可用來源（不要求 enabled=True）。
     - custom：取 search.custom_source_ids 指定來源（不要求 enabled=True）。
 
@@ -79,12 +78,13 @@ def get_enabled_source_ids(
         custom_ids = []
     custom_set = {sid for sid in custom_ids if isinstance(sid, str)}
     max_sources = _max_sources_per_search(search)
+    effective_mode = "all" if mode == "enabled" and search.get("uncensored_mode_enabled") is True else mode
 
     included: list[dict] = []
     for s in sources:
         if not isinstance(s, dict):
             continue
-        if not _mode_includes_source(s, mode, custom_set):
+        if not _mode_includes_source(s, effective_mode, custom_set):
             continue
         if s.get('manual_only') is True:
             continue
@@ -128,7 +128,7 @@ def is_uncensored_mode_effective(config: dict) -> bool:
     接受 config dict 作參數（**不**自己呼叫 `load_config()`，因 routing 路徑已持有 config）。
 
     - **Derive 分支**（`config['sources']` 存在且非空）：檢查 4 個有碼 builtin
-      （`CENSORED_SOURCES` = dmm/javbus/jav321/javdb）在 sources 段的 enabled 狀態。
+      （`CENSORED_SOURCES` = dmm/javbus/jav321/javdb/missav）在 sources 段的 enabled 狀態。
       全部 disabled（或缺席）→ True；任一 enabled → False。
     - **Fallback 分支**（`sources` 缺失或為空 `[]`）：讀 legacy
       `config['search']['uncensored_mode_enabled']`（default False）。
@@ -170,9 +170,9 @@ def _mode_includes_source(source: dict, mode: str, custom_ids: set[str]) -> bool
     if mode == "all":
         return True
     if mode == "censored":
-        return _source_is_censored(source) is True
+        return True
     if mode == "uncensored":
-        return _source_is_censored(source) is False
+        return True
     return source.get("enabled") is True
 
 

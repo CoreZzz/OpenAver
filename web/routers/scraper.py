@@ -39,6 +39,13 @@ def _canonical_number_or_original(value: str | None) -> str | None:
     return identity.search_number or identity.canonical_number or str(value).strip().upper()
 
 
+def _centralized_sidecar_enabled(config: dict) -> bool:
+    sidecar = config.get("sidecar") if isinstance(config, dict) else {}
+    if not isinstance(sidecar, dict):
+        return False
+    return sidecar.get("mode") == "centralized" and bool(str(sidecar.get("root_dir", "")).strip())
+
+
 class ScrapeRequest(BaseModel):
     file_path: str
     number: Optional[str] = None
@@ -271,11 +278,12 @@ def fetch_samples_endpoint(req: FetchSamplesRequest) -> dict:
     search_cfg = config.get("search", {})
     proxy_url = search_cfg.get("proxy_url", "")
 
-    folder_uri_prefix = to_file_uri(os.path.dirname(uri_to_fs_path(req.file_path))) + "/"
-    repo = VideoRepository()
-    count = repo.count_videos_in_folder(folder_uri_prefix)
-    if count > 1:
-        return {"success": False, "error": "multi_video_folder", "count": count, "extrafanart_written": 0}
+    if not _centralized_sidecar_enabled(config):
+        folder_uri_prefix = to_file_uri(os.path.dirname(uri_to_fs_path(req.file_path))) + "/"
+        repo = VideoRepository()
+        count = repo.count_videos_in_folder(folder_uri_prefix)
+        if count > 1:
+            return {"success": False, "error": "multi_video_folder", "count": count, "extrafanart_written": 0}
 
     try:
         result = fetch_samples_only(

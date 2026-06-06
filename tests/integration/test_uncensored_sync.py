@@ -10,7 +10,7 @@
 """
 from core import source_settings
 
-CENSORED = ['dmm', 'javbus', 'jav321', 'javdb']
+CENSORED = ['dmm', 'javbus', 'jav321', 'javdb', 'missav']
 UNCENSORED = ['d2pass', 'heyzo', 'fc2', 'avsox']
 
 

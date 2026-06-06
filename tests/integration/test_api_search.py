@@ -116,10 +116,10 @@ class TestSearchSourceValidation:
         response = client.get('/api/search', params={'q': 'SONE-103', 'source': 'auto'})
         assert response.status_code != 400
 
-    def test_d2pass_and_heyzo_sources_not_400(self, client, mocker):
+    def test_uncensored_and_theporndb_sources_not_400(self, client, mocker):
         """d2pass / heyzo（capabilities 原缺、search 一直接受）→ 非 400"""
         mocker.patch('web.routers.search.smart_search', return_value=[])
-        for src in ('d2pass', 'heyzo'):
+        for src in ('d2pass', 'heyzo', 'theporndb'):
             response = client.get('/api/search', params={'q': 'SONE-103', 'source': src})
             assert response.status_code != 400, f"source={src} should not be 400"
 
@@ -201,6 +201,8 @@ class TestSearchSources:
         # 檢查 auto 選項存在
         source_ids = [s["id"] for s in data["sources"]]
         assert "auto" in source_ids
+        assert "missav" in source_ids
+        assert "theporndb" in source_ids
 
     def test_sources_has_order(self, client):
         """測試 sources 包含 order 欄位"""
@@ -217,6 +219,8 @@ class TestSearchSources:
         # 檢查順序包含基本來源
         assert "javbus" in data["order"]
         assert "jav321" in data["order"]
+        assert "missav" in data["order"]
+        assert "theporndb" in data["order"]
 
     def test_sources_order_matches_sources(self, client):
         """測試 order 與 sources 一致"""
@@ -868,6 +872,19 @@ class TestProxyImageReferer:
         headers_sent = call_kwargs.get('headers', {})
         assert headers_sent.get('Referer') == 'https://www.javbus.com/'
 
+    def test_proxy_image_javdb_cdn_referer(self, client):
+        """JavDB CDN actor images should be fetched with JavDB Referer."""
+        url = 'https://c0.jdbstatic.com/actors/mikami-yua.jpg'
+
+        with patch('web.routers.search.requests.get', return_value=self._make_mock_response()) as mock_get:
+            response = client.get('/api/proxy-image', params={'url': url})
+
+        assert response.status_code == 200
+        mock_get.assert_called_once()
+        _, call_kwargs = mock_get.call_args
+        headers_sent = call_kwargs.get('headers', {})
+        assert headers_sent.get('Referer') == 'https://javdb.com/'
+
     def test_proxy_image_unknown_domain_no_referer(self, client):
         """未知 domain 應被 SSRF allowlist 攔截，回 403 且不發出 HTTP 請求"""
         url = 'https://cdn.example.com/image.jpg'
@@ -1035,6 +1052,14 @@ class TestProxyImageSSRF:
         原 allowlist 無此 host → 403。
         """
         url = 'https://file.netcdn.space/storage/caribbeancom/moviepages/032620-001/images/l_l.jpg'
+        with patch('web.routers.search.requests.get', return_value=self._make_mock_response()) as mock_get:
+            response = client.get('/api/proxy-image', params={'url': url})
+        assert response.status_code == 200
+        mock_get.assert_called_once()
+
+    def test_allow_pacopacomama_cover_host(self, client):
+        """Pacopacomama current cover CDN should pass proxy-image allowlist."""
+        url = 'https://www.pacopacomama.com/assets/sample/072220_001/l_hd.jpg'
         with patch('web.routers.search.requests.get', return_value=self._make_mock_response()) as mock_get:
             response = client.get('/api/proxy-image', params={'url': url})
         assert response.status_code == 200
@@ -1363,6 +1388,8 @@ class TestBatchSearch:
                 'cover_url': 'http://example.com/cover.jpg',
                 '_summary': 'internal summary should be stripped',
                 '_rating': 4.5,
+                '_actress_aliases': {'Alice': ['A']},
+                '_actress_profiles': [{'name': 'Alice'}],
             }]
 
         mocker.patch('web.routers.search.smart_search', side_effect=mock_smart_search)
@@ -1375,6 +1402,8 @@ class TestBatchSearch:
         assert entry['found'] is True
         assert '_summary' not in entry, "_summary must be stripped from batch-search response"
         assert '_rating' not in entry, "_rating must be stripped from batch-search response"
+        assert '_actress_aliases' not in entry
+        assert '_actress_profiles' not in entry
         # Canonical fields should still be present
         assert entry['title'] == 'Found Title'
 

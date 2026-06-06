@@ -4,7 +4,7 @@
 Routes:
     C1 text  : Minnano → Wikipedia → Graphis → None
     C2 parallel: minnano + wiki + graphis + gfriends (max_workers=4, 5s budget)
-    C3 photo : Graphis prof_url → gfriends URL → Wiki photo_url → Minnano photo_url → None
+    C3 photo : gfriends URL → Graphis prof_url → Wiki photo_url → Minnano photo_url → None
     C4 return: nested new fields + legacy flat shortcuts
     TD-1     : current_age computed from text.birth, never read from source
 """
@@ -186,11 +186,11 @@ def get_actress_profile(name: str, makers: list = None) -> ProfileResult:
         text = None
 
     # Photo cascade (decoupled from text):
-    # Graphis prof_url → gfriends URL → Wiki photo_url → Minnano photo_url → None
-    if graphis_result and graphis_result.get("prof_url"):
-        photo_url, photo_source = graphis_result["prof_url"], "graphis"
-    elif gfriends_url:
+    # gfriends URL → Graphis prof_url → Wiki photo_url → Minnano photo_url → None
+    if gfriends_url:
         photo_url, photo_source = gfriends_url, "gfriends"
+    elif graphis_result and graphis_result.get("prof_url"):
+        photo_url, photo_source = graphis_result["prof_url"], "graphis"
     elif wiki_result and wiki_result.get("photo_url"):
         photo_url, photo_source = wiki_result["photo_url"], "wiki"
     elif minnano_result and minnano_result.get("photo_url"):

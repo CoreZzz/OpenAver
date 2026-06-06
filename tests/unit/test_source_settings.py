@@ -104,7 +104,7 @@ def test_malformed_entries_do_not_crash(monkeypatch):
     assert source_settings.get_enabled_source_ids() == ['dmm']
 
 
-def test_source_mode_censored_includes_censored_even_if_disabled(monkeypatch):
+def test_source_mode_censored_uses_broad_search_pool(monkeypatch):
     _patch_config(monkeypatch, {
         'search': {'source_mode': 'censored'},
         'sources': [
@@ -112,10 +112,10 @@ def test_source_mode_censored_includes_censored_even_if_disabled(monkeypatch):
             {'id': 'fc2', 'type': 'builtin', 'enabled': True, 'order': 1, 'manual_only': False},
         ],
     })
-    assert source_settings.get_enabled_source_ids() == ['dmm']
+    assert source_settings.get_enabled_source_ids() == ['dmm', 'fc2']
 
 
-def test_source_mode_uncensored_includes_uncensored_even_if_disabled(monkeypatch):
+def test_source_mode_uncensored_uses_broad_search_pool(monkeypatch):
     _patch_config(monkeypatch, {
         'search': {'source_mode': 'uncensored'},
         'sources': [
@@ -124,7 +124,19 @@ def test_source_mode_uncensored_includes_uncensored_even_if_disabled(monkeypatch
             {'id': 'avsox', 'type': 'builtin', 'enabled': True, 'order': 2, 'manual_only': False},
         ],
     })
-    assert source_settings.get_enabled_source_ids() == ['fc2', 'avsox']
+    assert source_settings.get_enabled_source_ids() == ['javbus', 'fc2', 'avsox']
+
+
+def test_legacy_uncensored_enabled_mode_uses_broad_search_pool(monkeypatch):
+    _patch_config(monkeypatch, {
+        'search': {'source_mode': 'enabled', 'uncensored_mode_enabled': True},
+        'sources': [
+            {'id': 'javbus', 'type': 'builtin', 'enabled': False, 'order': 0, 'manual_only': False},
+            {'id': 'javdb', 'type': 'builtin', 'enabled': False, 'order': 1, 'manual_only': False},
+            {'id': 'fc2', 'type': 'builtin', 'enabled': True, 'order': 2, 'manual_only': False},
+        ],
+    })
+    assert source_settings.get_enabled_source_ids() == ['javbus', 'javdb', 'fc2']
 
 
 def test_source_mode_all_ignores_enabled_but_excludes_manual_beta(monkeypatch):
@@ -187,6 +199,7 @@ def test_uncensored_derive_all_censored_disabled_true():
             {'id': 'javbus', 'type': 'builtin', 'enabled': False},
             {'id': 'jav321', 'type': 'builtin', 'enabled': False},
             {'id': 'javdb', 'type': 'builtin', 'enabled': False},
+            {'id': 'missav', 'type': 'builtin', 'enabled': False},
             {'id': 'fc2', 'type': 'builtin', 'enabled': True},
         ]
     }
@@ -200,6 +213,7 @@ def test_uncensored_derive_one_censored_enabled_false():
             {'id': 'javbus', 'type': 'builtin', 'enabled': False},
             {'id': 'jav321', 'type': 'builtin', 'enabled': False},
             {'id': 'javdb', 'type': 'builtin', 'enabled': False},
+            {'id': 'missav', 'type': 'builtin', 'enabled': False},
         ]
     }
     assert source_settings.is_uncensored_mode_effective(config) is False
@@ -332,9 +346,9 @@ def test_all_sources_metatube_disabled_still_returned(monkeypatch):
 # FUZZY_SEARCH_SOURCES constant  (TASK-65a-1)
 # ---------------------------------------------------------------------------
 
-def test_fuzzy_search_sources_contains_correct_two():
-    """FUZZY_SEARCH_SOURCES must contain exactly the 2 fuzzy-capable censored sources (TASK-65g)."""
-    assert sorted(FUZZY_SEARCH_SOURCES) == sorted(['javbus', 'dmm'])
+def test_fuzzy_search_sources_contains_expected_sources():
+    """FUZZY_SEARCH_SOURCES includes Japanese fuzzy sources plus opt-in western sources."""
+    assert sorted(FUZZY_SEARCH_SOURCES) == sorted(['javbus', 'dmm', 'theporndb', 'javdb', 'missav'])
 
 
 def test_fuzzy_search_sources_excludes_avsox():

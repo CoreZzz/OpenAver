@@ -54,6 +54,7 @@ _ALLOWED_IMAGE_ROOT_DOMAINS = {
     "jav321.com",
     "heyzo.com",
     "caribbeancom.com",
+    "pacopacomama.com",
     "1pondo.tv",
     "10musume.com",
     "avsox.click",
@@ -62,6 +63,8 @@ _ALLOWED_IMAGE_ROOT_DOMAINS = {
     "javten.com",
     "fc2.com",  # FC2 圖床（contents-thumbnail2 / live-storage / storage<NNN>.contents 數字子域）
     "jdbstatic.com",  # JavDB CDN root (c0/c1/c2 numbered subdomains)
+    "missav.ai",
+    "theporndb.net",
 }
 # SSRF allowlist — exact match，不允子域（CD-60-1：CDN / 女優照片固定 host 嚴格匹配）
 _ALLOWED_IMAGE_EXACT_HOSTS = {
@@ -115,6 +118,16 @@ def proxy_image(url: str = Query(..., description="圖片 URL")):
             referer = "https://www.dmm.co.jp/"
         elif "jav321.com" in url:
             referer = "https://www.jav321.com/"
+        elif "javdb.com" in url or "jdbstatic.com" in url:
+            referer = "https://javdb.com/"
+        elif "missav.ai" in url:
+            referer = "https://missav.ai/"
+        elif "graphis.ne.jp" in url:
+            referer = "https://www.graphis.ne.jp/"
+        elif "minnano-av.com" in url:
+            referer = "https://www.minnano-av.com/"
+        elif "upload.wikimedia.org" in url:
+            referer = "https://ja.wikipedia.org/"
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -681,10 +694,12 @@ async def get_sources() -> dict:
         "javbus": "最常用的來源（封面無浮水印）",
         "jav321": "備用來源（封面完整）",
         "javdb": "資料完整（有片商）",
+        "missav": "資料完整備用來源",
         "d2pass": "1Pondo / Caribbeancom / 10musume",
         "heyzo": "HEYZO 專用",
         "fc2": "FC2 專用",
         "avsox": "無碼片源",
+        "theporndb": "歐美片名、女優與標籤資料",
     }
 
     # 動態生成 sources 列表

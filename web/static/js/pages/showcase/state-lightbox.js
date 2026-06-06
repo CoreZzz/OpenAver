@@ -420,6 +420,7 @@ export function stateLightbox() {
                 self.lightboxCloseTimer = null;
             }, 250);
 
+            this._setMetadataSearchContext(term, type);
             this.search = term;
             this._animateFilter();
             if (type === 'actress') {

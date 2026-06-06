@@ -11,6 +11,21 @@ from fastapi.testclient import TestClient
 from core.path_utils import to_file_uri
 
 
+def _test_config(sidecar_mode="alongside"):
+    root_dir = "D:/Metadata" if sidecar_mode == "centralized" else ""
+    return {
+        "search": {"proxy_url": ""},
+        "sidecar": {
+            "mode": sidecar_mode,
+            "root_dir": root_dir,
+            "layout": "{maker}/{num}",
+            "nfo_filename": "{num}.nfo",
+            "cover_filename": "cover.jpg",
+            "extrafanart_dir": "extrafanart",
+        },
+    }
+
+
 @pytest.fixture(scope="module")
 def client():
     from web.app import app
@@ -47,6 +62,7 @@ class TestFetchSamplesEndpoint:
         mock_result = _make_enrich_result(success=True, extrafanart_written=3)
 
         with patch("web.routers.scraper.VideoRepository") as mock_repo_cls, \
+             patch("web.routers.scraper.load_config", return_value=_test_config()), \
              patch("web.routers.scraper.fetch_samples_only", return_value=mock_result) as mock_fetch:
             mock_repo = MagicMock()
             mock_repo.count_videos_in_folder.return_value = 1
@@ -70,6 +86,7 @@ class TestFetchSamplesEndpoint:
     def test_multi_video_folder_returns_gate_response(self, client):
         """count=3：gate 觸發，不呼叫 fetch_samples_only()，回傳 multi_video_folder 錯誤"""
         with patch("web.routers.scraper.VideoRepository") as mock_repo_cls, \
+             patch("web.routers.scraper.load_config", return_value=_test_config()), \
              patch("web.routers.scraper.fetch_samples_only") as mock_fetch:
             mock_repo = MagicMock()
             mock_repo.count_videos_in_folder.return_value = 3
@@ -88,11 +105,35 @@ class TestFetchSamplesEndpoint:
         assert data["extrafanart_written"] == 0
         mock_fetch.assert_not_called()
 
+    def test_centralized_sidecar_skips_video_folder_gate(self, client):
+        """centralized sidecar：補劇照不再用影片所在資料夾的多片 gate 阻擋。"""
+        mock_result = _make_enrich_result(success=True, extrafanart_written=2)
+
+        with patch("web.routers.scraper.VideoRepository") as mock_repo_cls, \
+             patch("web.routers.scraper.load_config", return_value=_test_config("centralized")), \
+             patch("web.routers.scraper.fetch_samples_only", return_value=mock_result) as mock_fetch:
+            mock_repo = MagicMock()
+            mock_repo.count_videos_in_folder.return_value = 3
+            mock_repo_cls.return_value = mock_repo
+
+            resp = client.post("/api/scraper/fetch-samples", json={
+                "file_path": to_file_uri("/home/user/movies/mixed_folder/SONE-205.mp4"),
+                "number": "SONE-205",
+            })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["extrafanart_written"] == 2
+        mock_repo.count_videos_in_folder.assert_not_called()
+        mock_fetch.assert_called_once()
+
     def test_empty_folder_count_zero_proceeds_to_fetch(self, client):
         """count=0（DB 尚未掃描）：視為非多片，放行到 fetch_samples_only()"""
         mock_result = _make_enrich_result(success=True, extrafanart_written=0)
 
         with patch("web.routers.scraper.VideoRepository") as mock_repo_cls, \
+             patch("web.routers.scraper.load_config", return_value=_test_config()), \
              patch("web.routers.scraper.fetch_samples_only", return_value=mock_result) as mock_fetch:
             mock_repo = MagicMock()
             mock_repo.count_videos_in_folder.return_value = 0

@@ -84,7 +84,78 @@ def _canonical_number_or_original(value: str | None) -> str | None:
     if not value:
         return value
     identity = parse_media_identity(value)
-    return identity.search_number or identity.canonical_number or str(value).strip().upper()
+    return identity.search_number or identity.canonical_number or identity.raw_stem.strip() or str(value).strip()
+
+
+def _missing_video_status(video: Video | None) -> dict[str, Any] | None:
+    if video is None:
+        return {"missing_type": "unknown", "priority": 3}
+
+    has_nfo = (video.nfo_mtime or 0) > 0
+    has_cover = bool(video.cover_path)
+    if has_nfo and has_cover:
+        return None
+    if not has_nfo and not has_cover:
+        return {"missing_type": "both", "priority": 0}
+    if not has_cover:
+        return {"missing_type": "cover", "priority": 1}
+    return {"missing_type": "nfo", "priority": 2}
+
+
+def _repo_path_candidates(file_path: str) -> list[str]:
+    candidates = []
+    raw = str(file_path or "").strip()
+    if raw:
+        candidates.append(raw)
+    try:
+        normalized = to_file_uri(uri_to_fs_path(raw))
+        if normalized not in candidates:
+            candidates.append(normalized)
+    except Exception:
+        pass
+    return candidates
+
+
+def _get_video_for_item(repo: VideoRepository, file_path: str) -> Video | None:
+    for candidate in _repo_path_candidates(file_path):
+        video = repo.get_by_path(candidate)
+        if video is not None:
+            return video
+    return None
+
+
+def _missing_enrich_item_resolved(repo: VideoRepository, item: dict[str, str]) -> bool | None:
+    if item.get("missing_type") not in {"both", "cover", "nfo"}:
+        return None
+    try:
+        video = _get_video_for_item(repo, item.get("file_path", ""))
+    except Exception:
+        return None
+    if video is None:
+        return None
+    return _missing_video_status(video) is None
+
+
+def _missing_enrich_failure_reason(repo: VideoRepository, item: dict[str, str], result: Any = None) -> str:
+    try:
+        video = _get_video_for_item(repo, item.get("file_path", ""))
+    except Exception:
+        video = None
+
+    status = _missing_video_status(video)
+    if status is not None:
+        missing_type = status.get("missing_type")
+        if missing_type == "both":
+            return "仍缺 NFO 和封面"
+        if missing_type == "cover":
+            return "仍缺封面"
+        if missing_type == "nfo":
+            return "仍缺 NFO"
+
+    error = str(getattr(result, "error", "") or "").strip()
+    if error:
+        return error
+    return "未完成"
 
 
 def _missing_enrich_status_snapshot() -> dict:
@@ -130,15 +201,35 @@ def _append_missing_enrich_log(job: dict, level: str, message: str) -> None:
 
 def _dedupe_missing_enrich_items(raw_items: List[MissingEnrichItem]) -> list[dict[str, str]]:
     seen_paths = set()
-    items: list[dict[str, str]] = []
+    deduped: list[dict[str, str]] = []
     for item in raw_items:
         file_path = str(item.file_path or "").strip()
-        number = str(item.number or "").strip()
+        number = _canonical_number_or_original(str(item.number or "").strip()) or ""
         if not file_path or not number or file_path in seen_paths:
             continue
         seen_paths.add(file_path)
-        items.append({"file_path": file_path, "number": number})
-    return items
+        deduped.append({"file_path": file_path, "number": number})
+
+    try:
+        repo = VideoRepository(get_db_path())
+        ranked: list[tuple[int, int, dict[str, str]]] = []
+        for idx, item in enumerate(deduped):
+            if not item["file_path"].lower().startswith("file:"):
+                ranked.append((3, idx, item))
+                continue
+            video = _get_video_for_item(repo, item["file_path"])
+            status = _missing_video_status(video)
+            if status is None:
+                continue
+            enriched = dict(item)
+            enriched["missing_type"] = status["missing_type"]
+            ranked.append((status["priority"], idx, enriched))
+        if ranked:
+            return [item for _priority, _idx, item in sorted(ranked, key=lambda row: (row[0], row[1]))]
+        return []
+    except Exception:
+        logger.warning("missing enrich preflight recheck failed", exc_info=True)
+        return deduped
 
 
 def _run_missing_enrich_job(job: dict, items: list[dict[str, str]]) -> None:
@@ -148,6 +239,7 @@ def _run_missing_enrich_job(job: dict, items: list[dict[str, str]]) -> None:
         config = load_config()
         search_cfg = config.get("search", {}) if isinstance(config, dict) else {}
         proxy_url = search_cfg.get("proxy_url", "")
+        repo = VideoRepository(get_db_path())
 
         _emit_notif(
             "info",
@@ -169,6 +261,8 @@ def _run_missing_enrich_job(job: dict, items: list[dict[str, str]]) -> None:
 
         for idx, item in enumerate(items, start=1):
             number = _canonical_number_or_original(item["number"]) or item["number"]
+            result = None
+            failure_reason = ""
             _update_missing_enrich_job(
                 job,
                 current=idx - 1,
@@ -176,6 +270,15 @@ def _run_missing_enrich_job(job: dict, items: list[dict[str, str]]) -> None:
             )
 
             try:
+                if _missing_enrich_item_resolved(repo, item) is True:
+                    with _missing_enrich_lock:
+                        if _missing_enrich_job is not job:
+                            return
+                        job["success_count"] += 1
+                        job["current"] = idx
+                    _append_missing_enrich_log(job, "info", f"已略過已完整: {number}")
+                    continue
+
                 result = enrich_single(
                     file_path=item["file_path"],
                     number=number,
@@ -190,9 +293,16 @@ def _run_missing_enrich_job(job: dict, items: list[dict[str, str]]) -> None:
                     sidecar_config=config,
                 )
                 success = bool(getattr(result, "success", False))
+                resolved = _missing_enrich_item_resolved(repo, item)
+                if resolved is True:
+                    success = True
+                elif resolved is False:
+                    success = False
+                    failure_reason = _missing_enrich_failure_reason(repo, item, result)
             except Exception:
                 logger.exception("missing enrich item 失敗 number=%s", number)
                 success = False
+                failure_reason = "處理中斷"
 
             with _missing_enrich_lock:
                 if _missing_enrich_job is not job:
@@ -204,7 +314,9 @@ def _run_missing_enrich_job(job: dict, items: list[dict[str, str]]) -> None:
                 else:
                     job["failed_count"] += 1
                     level = "warn"
-                    message = f"補全失敗: {number}"
+                    if not failure_reason:
+                        failure_reason = _missing_enrich_failure_reason(repo, item, result)
+                    message = f"補全失敗: {number}（{failure_reason}）"
                 job["current"] = idx
 
             _append_missing_enrich_log(job, level, message)
@@ -307,23 +419,36 @@ def _video_sidecar_metadata(video: Video | None) -> dict:
     }
 
 
-def _centralized_sidecar_needs_rescan(
+def _sidecar_needs_rescan(
     fs_path: str,
     video: Video | None,
     config: dict,
     path_mappings: dict,
+    scanner: VideoScanner | None = None,
 ) -> bool:
-    if video is None or not _centralized_sidecar_enabled(config):
+    if video is None:
         return False
 
     paths = resolve_sidecar_paths(fs_path, _video_sidecar_metadata(video), config)
-    nfo_path = Path(paths.nfo_path)
+    nfo_candidates = [Path(paths.nfo_path)]
     cover_candidates = [Path(paths.cover_path), Path(paths.poster_path), Path(paths.fanart_path)]
-    sidecar_has_assets = nfo_path.is_file() or any(p.is_file() for p in cover_candidates) or Path(paths.extrafanart_dir).is_dir()
+    if scanner is not None:
+        video_path = Path(fs_path)
+        filename_info = scanner.parse_filename(video_path.name)
+        same_dir = scanner._same_directory_sidecar_paths(
+            video_path,
+            filename_info,
+            _video_sidecar_metadata(video),
+        )
+        nfo_candidates.extend(same_dir["nfo"])
+        cover_candidates.extend(same_dir["images"])
+
+    nfo_paths = [p for p in nfo_candidates if p.is_file()]
+    sidecar_has_assets = bool(nfo_paths) or any(p.is_file() for p in cover_candidates) or Path(paths.extrafanart_dir).is_dir()
     if not sidecar_has_assets:
         return False
 
-    if nfo_path.is_file() and video.nfo_mtime != nfo_path.stat().st_mtime:
+    if nfo_paths and video.nfo_mtime not in {p.stat().st_mtime for p in nfo_paths}:
         return True
 
     expected_cover_uris = {
@@ -390,8 +515,6 @@ def generate_avlist() -> Generator[str, None, None]:
 
         # 初始化掃描器
         scanner = VideoScanner(path_mappings=path_mappings, sidecar_config=config)
-        centralized_sidecar = _centralized_sidecar_enabled(config)
-
         total_dirs = len(directories)
         total_inserted = 0
         total_updated = 0
@@ -461,9 +584,15 @@ def generate_avlist() -> Generator[str, None, None]:
                     current_paths.add(file_uri)
 
                     db_entry = db_index.get(file_uri)
-                    db_video = repo.get_by_path(file_uri) if centralized_sidecar else None
+                    db_video = repo.get_by_path(file_uri) if db_entry is not None else None
                     if db_video is not None:
                         file_info['_sidecar_metadata'] = _video_sidecar_metadata(db_video)
+                    sidecar_mtime = scanner.sidecar_nfo_mtime(
+                        path,
+                        file_info.get('_sidecar_metadata'),
+                    )
+                    if sidecar_mtime:
+                        file_info['nfo_mtime'] = sidecar_mtime
 
                     if db_entry is None:
                         # 新檔案
@@ -475,7 +604,7 @@ def generate_avlist() -> Generator[str, None, None]:
                     ):
                         # mtime、nfo_mtime 或 size 變更
                         needs_scan.append(file_info)
-                    elif _centralized_sidecar_needs_rescan(path, db_video, config, path_mappings):
+                    elif _sidecar_needs_rescan(path, db_video, config, path_mappings, scanner):
                         needs_scan.append(file_info)
 
                 # 清理已刪除的檔案（限定在此目錄下）
@@ -827,25 +956,37 @@ async def check_missing():
         missing_both = 0
         missing_nfo = 0
         missing_cover = 0
-        items = []
+        ranked_items = []
 
         for v in all_videos:
+            status = _missing_video_status(v)
+            if status is None:
+                continue
             has_nfo = (v.nfo_mtime or 0) > 0
             has_cover = bool(v.cover_path)
-            if has_nfo and has_cover:
+            identity_source = v.number
+            if not identity_source:
+                try:
+                    identity_source = uri_to_fs_path(v.path)
+                except Exception:
+                    identity_source = v.path
+            item_number = _canonical_number_or_original(identity_source)
+            if not item_number:
                 continue
-            if not v.number:  # skip videos without number (cannot enrich)
-                continue
-            item = {"file_path": v.path, "number": v.number}
+            item = {"file_path": v.path, "number": item_number, "missing_type": status["missing_type"]}
             if not has_nfo and not has_cover:
                 missing_both += 1
             elif not has_nfo:
                 missing_nfo += 1
             else:
                 missing_cover += 1
-            items.append(item)
+            ranked_items.append((status["priority"], len(ranked_items), item))
 
         total_missing = missing_both + missing_nfo + missing_cover
+        items = [
+            item
+            for _priority, _idx, item in sorted(ranked_items, key=lambda row: (row[0], row[1]))
+        ]
 
         # 永遠回傳完整 items 清單；大批量的 confirm gate 由前端處理
         return {

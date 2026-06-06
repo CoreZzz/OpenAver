@@ -83,6 +83,34 @@ class TestMissingEnrichBackgroundAPI:
         assert status["failed_count"] == 0
         assert status["logs"]
 
+    def test_start_job_does_not_call_agent_or_openai_surfaces(self, client, mocker, reset_missing_enrich_job):
+        mocker.patch("web.routers.scanner.load_config", return_value={"search": {"proxy_url": ""}})
+        enrich = mocker.patch("web.routers.scanner.enrich_single", return_value=_ok_enrich_result())
+        capabilities = mocker.patch(
+            "web.routers.capabilities.get_capabilities",
+            side_effect=AssertionError("missing enrich must not call capabilities"),
+        )
+        openai_models = mocker.patch(
+            "web.routers.openai_translate.fetch_openai_models",
+            side_effect=AssertionError("missing enrich must not call OpenAI model listing"),
+        )
+        openai_test = mocker.patch(
+            "web.routers.openai_translate.test_openai_translate",
+            side_effect=AssertionError("missing enrich must not call OpenAI translation test"),
+        )
+
+        response = client.post("/api/gallery/missing-enrich/start", json={
+            "items": [{"file_path": "/video/SONE-205.mp4", "number": "SONE-205"}],
+        })
+
+        assert response.status_code == 200
+        status = _wait_missing_enrich(client)
+        assert status["state"] == "done"
+        assert enrich.call_count == 1
+        assert capabilities.call_count == 0
+        assert openai_models.call_count == 0
+        assert openai_test.call_count == 0
+
     def test_start_while_running_reuses_current_job(self, client, mocker, reset_missing_enrich_job):
         release = threading.Event()
 
@@ -128,6 +156,54 @@ class TestMissingEnrichBackgroundAPI:
         assert status["current"] == 2
         assert status["success_count"] == 1
         assert status["failed_count"] == 1
+
+    def test_start_filters_complete_items_and_prioritizes_missing_both(
+        self, client, mocker, tmp_path, reset_missing_enrich_job
+    ):
+        from core.database import init_db, Video, VideoRepository
+
+        db_path = tmp_path / "missing-enrich.db"
+        init_db(db_path)
+        repo = VideoRepository(db_path)
+
+        complete_uri = to_file_uri(str(tmp_path / "complete.mp4"))
+        cover_only_uri = to_file_uri(str(tmp_path / "cover-only.mp4"))
+        both_uri = to_file_uri(str(tmp_path / "both.mp4"))
+        repo.upsert_batch([
+            Video(path=complete_uri, number="AAA-001", cover_path="/covers/a.jpg", nfo_mtime=1.0),
+            Video(path=cover_only_uri, number="COV-003", cover_path="", nfo_mtime=1.0),
+            Video(path=both_uri, number="BBB-002", cover_path="", nfo_mtime=0.0),
+        ])
+
+        calls = []
+
+        def fake_enrich(file_path, number, **_kwargs):
+            calls.append(number)
+            video = repo.get_by_path(file_path)
+            video.cover_path = f"/covers/{number}.jpg"
+            video.nfo_mtime = 2.0
+            repo.upsert(video)
+            return _ok_enrich_result()
+
+        mocker.patch("web.routers.scanner.get_db_path", return_value=db_path)
+        mocker.patch("web.routers.scanner.load_config", return_value={"search": {"proxy_url": ""}})
+        mocker.patch("web.routers.scanner.enrich_single", side_effect=fake_enrich)
+
+        response = client.post("/api/gallery/missing-enrich/start", json={
+            "items": [
+                {"file_path": complete_uri, "number": "AAA-001"},
+                {"file_path": cover_only_uri, "number": "COV-003"},
+                {"file_path": both_uri, "number": "BBB-002"},
+            ],
+        })
+
+        assert response.status_code == 200
+        status = _wait_missing_enrich(client)
+        assert status["state"] == "done"
+        assert status["total"] == 2
+        assert status["success_count"] == 2
+        assert status["failed_count"] == 0
+        assert calls == ["BBB-002", "COV-003"]
 
 class TestScannerAPI:
     """測試 scanner.py 相關 endpoints"""
@@ -777,13 +853,34 @@ class TestMissingCheckAPI:
         assert data['data']['total_missing'] == 4
         assert len(data['data']['items']) == 4
 
-    def test_null_number_excluded(self, client, tmp_path, monkeypatch):
+    def test_items_prioritize_missing_both_then_cover_then_nfo(self, client, tmp_path, monkeypatch):
+        from unittest.mock import patch
+        from core.database import Video
+        from core.path_utils import to_file_uri
+
+        videos = [
+            Video(path=to_file_uri(str(tmp_path / "nfo-only.mp4")), number="NFO-001",
+                  cover_path="/covers/nfo.jpg", nfo_mtime=0.0),
+            Video(path=to_file_uri(str(tmp_path / "cover-only.mp4")), number="COV-002",
+                  cover_path="", nfo_mtime=123.0),
+            Video(path=to_file_uri(str(tmp_path / "both.mp4")), number="BOT-003",
+                  cover_path="", nfo_mtime=0.0),
+        ]
+        db_path = self._make_db(tmp_path, videos)
+        with patch('web.routers.scanner.get_db_path', return_value=db_path):
+            resp = client.get('/api/gallery/missing-check')
+
+        items = resp.json()['data']['items']
+        assert [item['number'] for item in items] == ["BOT-003", "COV-002", "NFO-001"]
+        assert [item['missing_type'] for item in items] == ["both", "cover", "nfo"]
+
+    def test_null_number_uses_filename_as_search_query(self, client, tmp_path, monkeypatch):
         """number IS NULL 的記錄不計入 items（無法補完）"""
         from unittest.mock import patch
         from core.database import Video
         from core.path_utils import to_file_uri
         videos = [
-            Video(path=to_file_uri(str(tmp_path / "a.mp4")), number=None,
+            Video(path=to_file_uri(str(tmp_path / "Blacked.16.12.26.Lena.Paul.mp4")), number=None,
                   cover_path="", nfo_mtime=0.0),
             Video(path=to_file_uri(str(tmp_path / "b.mp4")), number="BBB-002",
                   cover_path="", nfo_mtime=0.0),
@@ -792,9 +889,10 @@ class TestMissingCheckAPI:
         with patch('web.routers.scanner.get_db_path', return_value=db_path):
             resp = client.get('/api/gallery/missing-check')
         data = resp.json()
-        assert data['data']['total_missing'] == 1
-        assert len(data['data']['items']) == 1
-        assert data['data']['items'][0]['number'] == 'BBB-002'
+        assert data['data']['total_missing'] == 2
+        assert len(data['data']['items']) == 2
+        assert data['data']['items'][0]['number'] == 'Blacked.16.12.26.Lena.Paul'
+        assert data['data']['items'][1]['number'] == 'BBB-002'
 
     def test_response_includes_file_path(self, client, tmp_path, monkeypatch):
         """items 的每個元素包含 file_path 和 number"""
@@ -995,6 +1093,68 @@ class TestScannerGenerateLongPathsField:
         events = parse_sse_events(response.text)
         assert any(e.get("type") == "done" for e in events)
         assert repo.get_by_path(video_uri).size_bytes == stat.st_size
+
+    def test_generate_rescans_when_sidecar_cover_exists_but_db_missing(
+        self, client, tmp_path, monkeypatch, parse_sse_events
+    ):
+        """Existing canonical sidecar cover must be persisted even when mtimes did not change."""
+        from unittest.mock import patch
+        from core.database import init_db, VideoRepository, Video
+        from core.path_utils import to_file_uri
+
+        scan_dir = tmp_path / "videos"
+        scan_dir.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        video_path = scan_dir / "AVOP-460-1.mp4"
+        video_path.write_bytes(b"x" * 4096)
+        nfo_path = scan_dir / "AVOP-460.nfo"
+        nfo_path.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+    <title>Canonical Title</title>
+    <num>AVOP-460</num>
+    <maker>Studio</maker>
+</movie>
+""",
+            encoding="utf-8",
+        )
+        cover_path = scan_dir / "AVOP-460.jpg"
+        cover_path.write_bytes(b"cover")
+        stat = video_path.stat()
+
+        db_path = tmp_path / "test.db"
+        init_db(db_path)
+        repo = VideoRepository(db_path)
+        video_uri = to_file_uri(str(video_path))
+        repo.upsert(Video(
+            path=video_uri,
+            number="AVOP-460",
+            title="Canonical Title",
+            mtime=stat.st_mtime,
+            nfo_mtime=nfo_path.stat().st_mtime,
+            size_bytes=stat.st_size,
+            cover_path="",
+        ), preserve_scan_fields=False)
+
+        monkeypatch.setattr("web.routers.scanner.load_config", lambda: {
+            "gallery": {
+                "directories": [str(scan_dir)],
+                "output_dir": str(output_dir),
+                "path_mappings": {},
+                "min_size_mb": 0,
+            },
+            "general": {"theme": "light"},
+            "scraper": {"video_extensions": [".mp4"]},
+        })
+
+        with patch("web.routers.scanner.get_db_path", return_value=db_path):
+            response = client.get("/api/gallery/generate")
+
+        assert response.status_code == 200
+        events = parse_sse_events(response.text)
+        assert any(e.get("type") == "done" for e in events)
+        assert repo.get_by_path(video_uri).cover_path == to_file_uri(str(cover_path))
 
     def test_skipped_long_paths_captured_via_on_skip(
         self, client, tmp_path, monkeypatch, parse_sse_events

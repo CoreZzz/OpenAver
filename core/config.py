@@ -76,6 +76,7 @@ class SourceLinksConfig(BaseModel):
     javbus: bool = False
     jav321: bool = False
     javdb: bool = False
+    missav: bool = False
     avsox: bool = False
 
 
@@ -148,6 +149,20 @@ class GeneralConfig(BaseModel):
     locale: Literal["zh-TW", "zh-CN", "ja", "en"] = "zh-TW"  # 介面語系
 
 
+class MetadataOverrideConfig(BaseModel):
+    numbers: List[str] = []
+    actresses: List[str] = []
+    maker: str = ""
+    title: str = ""
+    original_title: str = ""
+    date: str = ""
+    release_date: str = ""
+    director: str = ""
+    series: str = ""
+    label: str = ""
+    tags: List[str] = []
+
+
 class AppConfig(BaseModel):
     scraper: ScraperConfig = ScraperConfig()
     search: SearchConfig = SearchConfig()
@@ -160,6 +175,7 @@ class AppConfig(BaseModel):
     sources: list[SourceConfig] = Field(default_factory=get_builtin_sources)
     advanced_search_enabled: bool = False  # 進階搜尋 picker（TASK-61c-7）；Pydantic default 自動補缺漏
     metatube: MetatubeConfig = MetatubeConfig()  # CD-63b-3；Pydantic default 自動補缺漏（no migration needed）
+    metadata_overrides: List[MetadataOverrideConfig] = []
 
 
 # ============ 載入 / 儲存 ============
@@ -344,7 +360,7 @@ def load_config() -> dict:
                     need_save = True
 
         # Migration: sources 段（TASK-61a-2）— US1-critical，fail-open
-        # 缺段 → 8 builtin 全 enabled（不讀 source_links，CD-61-6）；
+        # 缺段 → builtin defaults（不讀 source_links，CD-61-6）；
         # uncensored_mode_enabled=true 升級 → 4 有碼初始 disabled（CD-61-7）；
         # 合法既有段 → 冪等不動；損壞 → 備份 sources_bak + 重設全 enabled + warning。
         try:
@@ -352,6 +368,32 @@ def load_config() -> dict:
 
             def _default_sources() -> list:
                 return [s.model_dump() for s in get_builtin_sources()]
+
+            def _append_missing_new_builtins(existing_sources: list) -> bool:
+                """Append missing builtins without regenerating user source state."""
+                existing_ids = {
+                    item.get('id')
+                    for item in existing_sources
+                    if isinstance(item, dict)
+                }
+                existing_orders = [
+                    item.get('order', 0)
+                    for item in existing_sources
+                    if isinstance(item, dict)
+                ]
+                next_order = max(existing_orders or [0]) + 1
+                changed = False
+                for default_source in _default_sources():
+                    sid = default_source.get('id')
+                    if sid in existing_ids:
+                        continue
+                    item = dict(default_source)
+                    item['order'] = next_order
+                    existing_sources.append(item)
+                    existing_ids.add(sid)
+                    next_order += 1
+                    changed = True
+                return changed
 
             def _is_valid_sources(value) -> bool:
                 if not isinstance(value, list) or not value:
@@ -366,7 +408,7 @@ def load_config() -> dict:
                     # Full schema validation: catch any field-level corruption
                     # (e.g. wrong types, missing required fields) that id/enabled
                     # checks above cannot detect. On any error → treat segment as
-                    # corrupt → existing fallback regenerates 8 builtin + backs up.
+                    # corrupt → existing fallback regenerates builtin defaults + backs up.
                     try:
                         SourceConfig.model_validate(item)
                     except Exception:
@@ -374,7 +416,7 @@ def load_config() -> dict:
                 return True
 
             if 'sources' not in raw_config:
-                # 缺段：生成 8 builtin 全 enabled
+                # 缺段：生成 builtin defaults
                 new_sources = _default_sources()
                 # uncensored 轉換（僅缺段升級時觸發，冪等）
                 if raw_config.get('search', {}).get('uncensored_mode_enabled') is True:
@@ -384,8 +426,9 @@ def load_config() -> dict:
                 raw_config['sources'] = new_sources
                 need_save = True
             elif _is_valid_sources(raw_config.get('sources')):
-                # 合法既有段：冪等，不動
-                pass
+                # 合法既有段：保留既有狀態，只追加新的 opt-in builtin。
+                if _append_missing_new_builtins(raw_config['sources']):
+                    need_save = True
             else:
                 # 損壞：備份原值（不覆寫首次備份）+ 重設全 enabled
                 if 'sources_bak' not in raw_config:
@@ -401,6 +444,10 @@ def load_config() -> dict:
                 raw_config['sources'] = [s.model_dump() for s in get_builtin_sources()]
             except Exception:
                 raw_config['sources'] = []
+            need_save = True
+
+        if 'metadata_overrides' not in raw_config or not isinstance(raw_config.get('metadata_overrides'), list):
+            raw_config['metadata_overrides'] = []
             need_save = True
 
         # Save migrated config

@@ -7,6 +7,7 @@ Phase 16 Task 2: 測試 5 個爬蟲模組
 import pytest
 from core.scrapers import (
     JavBusScraper, JAV321Scraper, JavDBScraper,
+    MissAVScraper,
     FC2Scraper, AVSOXScraper,
     Video, Actress
 )
@@ -234,6 +235,7 @@ class TestMultiSourceIntegration:
             JavBusScraper(),
             JAV321Scraper(),
             JavDBScraper(),
+            MissAVScraper(),
             FC2Scraper(),
             AVSOXScraper(),
         ]
@@ -255,6 +257,7 @@ class TestMultiSourceIntegration:
             JavBusScraper(),
             JAV321Scraper(),
             JavDBScraper(),
+            MissAVScraper(),
             FC2Scraper(),
             AVSOXScraper(),
         ]
@@ -262,5 +265,5 @@ class TestMultiSourceIntegration:
         source_names = [s.source_name for s in scrapers]
         assert len(source_names) == len(set(source_names)), "來源名稱應唯一"
 
-        expected_names = {"javbus", "jav321", "javdb", "fc2", "avsox"}
+        expected_names = {"javbus", "jav321", "javdb", "missav", "fc2", "avsox"}
         assert set(source_names) == expected_names

@@ -4,7 +4,8 @@ from core.path_utils import to_file_uri
 from web.routers.showcase import _group_videos_by_work, _serialize_video
 
 
-def _video(path, number="SONE-103", title="Test", size=100, duration=None):
+def _video(path, number="SONE-103", title="Test", size=100, duration=None,
+           cover_path="", nfo_mtime=0):
     return SimpleNamespace(
         path=to_file_uri(str(path)),
         number=number,
@@ -15,7 +16,7 @@ def _video(path, number="SONE-103", title="Test", size=100, duration=None):
         release_date="",
         tags=[],
         size_bytes=size,
-        cover_path="",
+        cover_path=cover_path,
         mtime=0,
         director="",
         duration=duration,
@@ -23,7 +24,7 @@ def _video(path, number="SONE-103", title="Test", size=100, duration=None):
         label="",
         sample_images=[],
         user_tags=[],
-        nfo_mtime=0,
+        nfo_mtime=nfo_mtime,
     )
 
 
@@ -80,6 +81,34 @@ def test_showcase_serialized_group_uses_work_number_for_card_name(tmp_path):
     assert [file["part_index"] for file in data["files"]] == ["1", "2"]
     assert data["files"][0]["filename"] == "AVOP-460-1.mp4"
     assert "duration" not in data["files"][0]
+
+
+def test_showcase_group_prefers_part_with_persisted_assets(tmp_path):
+    cover = to_file_uri(str(tmp_path / "AVOP-460.jpg"))
+    videos = [
+        _video(
+            tmp_path / "AVOP-460-1.mp4",
+            number="AVOP-460",
+            title="AVOP-460",
+            nfo_mtime=123.0,
+        ),
+        _video(
+            tmp_path / "AVOP-460-2.mp4",
+            number="AVOP-460",
+            title="Scraped Title",
+            cover_path=cover,
+        ),
+    ]
+    primary, identity, files = _group_videos_by_work(videos)[0]
+
+    data = _serialize_video(primary, {}, identity=identity, files=files)
+
+    assert data["work_key"] == "AVOP-460"
+    assert data["has_cover"] is True
+    assert data["has_nfo"] is True
+    assert data["cover_url"].startswith("/api/gallery/image?path=")
+    assert [file["part_index"] for file in data["files"]] == ["1", "2"]
+    assert all("_cover_path" not in file for file in data["files"])
 
 
 def test_showcase_serialized_video_exposes_directory_label(tmp_path):

@@ -100,6 +100,19 @@ def test_download_http_non_200(gfriends_dir):
         assert len(files) == 0
 
 
+def test_download_javdb_cdn_subdomain_allowed(gfriends_dir):
+    """JavDB actor images can be downloaded from numbered jdbstatic CDN hosts."""
+    mock_resp = make_mock_response(status_code=200, content_type="image/jpeg")
+    url = "https://c0.jdbstatic.com/actors/mikami-yua.jpg"
+    with patch("core.actress_photo.requests.get", return_value=mock_resp) as mock_get:
+        result = download_actress_photo("javdb-actress", url, "javdb")
+
+    assert result is True
+    assert get_local_photo_path("javdb-actress") is not None
+    headers = mock_get.call_args.kwargs["headers"]
+    assert headers["Referer"] == "https://javdb.com/"
+
+
 # -------------------------------------------------------------------
 # Test 5: delete_local_photo 後 get_local_photo_path 回 None
 # -------------------------------------------------------------------
@@ -465,5 +478,4 @@ def test_download_actress_photo_accepts_data_graphis_subdomain(gfriends_dir):
         result = download_actress_photo("テスト女優B", url, "graphis")
     assert result is True
     mock_get.assert_called_once()
-
 

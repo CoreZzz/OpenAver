@@ -3,8 +3,12 @@ import json
 import re
 import requests
 from typing import Optional
+from urllib.parse import urljoin
+
+from bs4 import BeautifulSoup
 
 from core.logger import get_logger
+from core.metadata_corrections import sanitize_actor_names
 
 logger = get_logger(__name__)
 from .base import BaseScraper
@@ -49,6 +53,38 @@ class D2PassScraper(BaseScraper):
 
     def _get_source_name(self) -> str:
         return "d2pass"
+
+    def _make_actresses(self, names: list[str]) -> list[Actress]:
+        return [Actress(name=name) for name in sanitize_actor_names(names)]
+
+    def _extract_caribbeancom_actor_names(self, html_text: str) -> list[str]:
+        soup = BeautifulSoup(html_text, "html.parser")
+
+        def add_text(values: list[str], node) -> None:
+            if not node:
+                return
+            text = node.get_text(" ", strip=True)
+            if text:
+                values.append(text)
+
+        names: list[str] = []
+        for item in soup.select("li.movie-spec"):
+            title = item.select_one(".spec-title")
+            if not title:
+                continue
+            title_text = title.get_text(" ", strip=True).lower()
+            if title_text not in {"出演", "出演者", "女優", "actor", "actress", "cast"}:
+                continue
+
+            content = item.select_one(".spec-content") or item
+            for node in content.select('[itemprop="actor"] [itemprop="name"], [itemprop="actor"], [itemprop="name"], a[href*="/search_act/"], .spec__tag'):
+                add_text(names, node)
+
+        if not names:
+            for node in soup.select('[itemprop="actor"] [itemprop="name"], [itemprop="actor"], a[href*="/search_act/"]'):
+                add_text(names, node)
+
+        return sanitize_actor_names(names)
 
     def normalize_number(self, number: str) -> str:
         """
@@ -133,7 +169,7 @@ class D2PassScraper(BaseScraper):
                 if v.get('NameJa') or v.get('NameEn')
             ]
 
-        actresses = [Actress(name=name) for name in actress_names if name]
+        actresses = self._make_actresses(actress_names)
 
         # 封面（ThumbHigh 優先，再 MovieThumb）
         cover_url = data.get('ThumbHigh') or data.get('MovieThumb') or ''
@@ -213,11 +249,34 @@ class D2PassScraper(BaseScraper):
             logger.debug(f"D2Pass gallery fetch failed for {site}/{movie_id}: {e}")
             return []
 
+    def _extract_caribbeancom_cover_url(self, html_text: str, movie_id: str) -> str:
+        """Extract the public cover URL from current Caribbean/Pacopacomama pages."""
+        escaped_id = re.escape(movie_id)
+        patterns = [
+            rf'https?://[^"\'>\s]+/assets/sample/{escaped_id}/l_hd\.jpg',
+            rf'//[^"\'>\s]+/assets/sample/{escaped_id}/l_hd\.jpg',
+            rf'/assets/sample/{escaped_id}/[\'"]?\s*\+\s*[\'"]l_hd\.jpg',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, html_text)
+            if not match:
+                continue
+            value = match.group(0).replace("'+'", "").replace('"+"', "")
+            value = re.sub(r'[\'"\s+]+', '', value)
+            if value.startswith("//"):
+                return f"https:{value}"
+            if value.startswith("/"):
+                return urljoin("https://www.pacopacomama.com", value)
+            return value
+
+        if f"/assets/sample/{movie_id}/" in html_text and "_" in movie_id:
+            return f"https://www.pacopacomama.com/assets/sample/{movie_id}/l_hd.jpg"
+        return f"https://www.caribbeancom.com/moviepages/{movie_id}/images/l_l.jpg"
+
     def _parse_caribbeancom_html(self, movie_id: str) -> Optional[Video]:
         """caribbeancom JSON API 404 時的 HTML fallback。
 
         從 HTML 頁面解析完整 Video（含 gallery）。
-        用 regex 解析，不引入 BeautifulSoup/lxml 依賴。
         """
         html_url = self.SITE_DETAIL_URL['caribbeancom'].format(id=movie_id)
         try:
@@ -250,12 +309,7 @@ class D2PassScraper(BaseScraper):
                 series = m.group(1).strip()
 
             # Actresses — 出演 後的 </li> 區間內所有 <a> 文字
-            actresses: list[Actress] = []
-            m = re.search(r'出演(.*?)</li>', html_text, re.DOTALL)
-            if m:
-                block = m.group(1)
-                names = re.findall(r'<a[^>]*>([^<]+)</a>', block)
-                actresses = [Actress(name=n.strip()) for n in names if n.strip()]
+            actresses = self._make_actresses(self._extract_caribbeancom_actor_names(html_text))
 
             # Tags — タグ 後的 </li> 區間內所有 <a> 文字
             tags: list[str] = []
@@ -277,7 +331,7 @@ class D2PassScraper(BaseScraper):
                     sample_images.append(f'{base}/{n}.jpg')
 
             # Cover
-            cover_url = f'https://www.caribbeancom.com/moviepages/{movie_id}/images/l_l.jpg'
+            cover_url = self._extract_caribbeancom_cover_url(html_text, movie_id)
 
             # Detail URL
             detail_url = self.SITE_DETAIL_URL['caribbeancom'].format(id=movie_id)

@@ -68,6 +68,12 @@ class BaseScraper(ABC):
             True 如果格式正確
         """
         import re
+        from core.filename_identity import parse_media_identity
+
+        identity = parse_media_identity(number)
+        if identity.canonical_number and identity.canonical_number == str(number or "").strip().upper():
+            return True
+
         patterns = [
             r'^[A-Z]+-\d+$',         # ABC-123
             r'^FC2-PPV-\d+$',        # FC2-PPV-1234567

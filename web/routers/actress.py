@@ -40,6 +40,15 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/actresses", tags=["actresses"])
 
+_JAPANESE_NAME_VARIANTS = str.maketrans({
+    "亚": "亜",
+    "樱": "桜",
+    "优": "優",
+    "爱": "愛",
+    "纱": "紗",
+    "绘": "絵",
+})
+
 
 # ---------------------------------------------------------------------------
 # Request model
@@ -51,7 +60,7 @@ class FavoriteRequest(BaseModel):
 
 
 class SetActressPhotoRequest(BaseModel):
-    source: str                          # "graphis"|"gfriends"|"wiki"|"minnano"|"local_crop"
+    source: str                          # "graphis"|"gfriends"|"javdb"|"wiki"|"minnano"|"local_crop"
     url: Optional[str] = None            # 雲端來源：照片 URL（必填）
     video_path: Optional[str] = None     # local_crop：影片 file:/// URI（必填）
     crop_spec: Optional[str] = "v1"      # local_crop：裁切規格（預設 v1）
@@ -91,7 +100,33 @@ def _flatten_aliases(raw) -> list:
     return [a.get("ja", "") if isinstance(a, dict) else str(a) for a in raw]
 
 
-def _actress_to_response(actress: Actress, video_count: int = 0) -> dict:
+def _merged_aliases(actress: Actress, alias_repo: Optional[AliasRepository] = None) -> list:
+    merged = []
+
+    def add_alias(alias: str):
+        if alias and alias != actress.name and alias not in merged:
+            merged.append(alias)
+
+    for alias in actress.aliases or []:
+        add_alias(alias)
+
+    if alias_repo is not None:
+        record = alias_repo.get_by_primary(actress.name)
+        if record is None:
+            record = alias_repo.find_by_alias(actress.name)
+        if record is not None:
+            add_alias(record.primary_name)
+            for alias in record.aliases or []:
+                add_alias(alias)
+
+    return merged
+
+
+def _actress_to_response(
+    actress: Actress,
+    video_count: int = 0,
+    alias_repo: Optional[AliasRepository] = None,
+) -> dict:
     """將 Actress dataclass 轉為 API response dict"""
     local_path = get_local_photo_path(actress.name)
     if local_path is not None:
@@ -111,7 +146,7 @@ def _actress_to_response(actress: Actress, video_count: int = 0) -> dict:
         "hip": actress.hip,
         "hometown": actress.hometown,
         "hobby": actress.hobby,
-        "aliases": actress.aliases or [],
+        "aliases": _merged_aliases(actress, alias_repo),
         "agency": actress.agency,
         "debut_work": actress.debut_work,
         "tags": actress.tags or [],
@@ -152,6 +187,7 @@ def add_favorite(req: FavoriteRequest):
 
     init_db()
     repo = ActressRepository()
+    alias_repo = AliasRepository()
 
     # 1. 已收藏檢查 → 409
     if repo.exists(name):
@@ -160,7 +196,7 @@ def add_favorite(req: FavoriteRequest):
             status_code=409,
             content={
                 "error": "already_exists",
-                "actress": _actress_to_response(existing),
+                "actress": _actress_to_response(existing, alias_repo=alias_repo),
             }
         )
 
@@ -250,7 +286,7 @@ def add_favorite(req: FavoriteRequest):
         status_code=200,
         content={
             "success": True,
-            "actress": _actress_to_response(actress, video_count),
+            "actress": _actress_to_response(actress, video_count, alias_repo),
             "photo_downloaded": photo_downloaded,
             "skipped_aliases": skipped_aliases,
         }
@@ -301,7 +337,7 @@ def list_actresses():
     result = []
     for actress in actresses:
         video_count = repo.count_videos_for_actress_names(alias_repo.resolve(actress.name))
-        result.append(_actress_to_response(actress, video_count))
+        result.append(_actress_to_response(actress, video_count, alias_repo))
     return JSONResponse(
         status_code=200,
         content={
@@ -326,26 +362,112 @@ def _fetch_single_source(name: str, source: str) -> Optional[str]:
         URL str 或 None
     """
     try:
+        names = _actress_cloud_name_candidates(name)
         if source == "graphis":
             from core.scrapers.actress.graphis import scrape_graphis_photo
-            r = scrape_graphis_photo(name)
-            return r.get("prof_url") if r else None
+            for candidate_name in names:
+                r = scrape_graphis_photo(candidate_name)
+                if r and r.get("prof_url"):
+                    return r.get("prof_url")
+            return None
         elif source == "gfriends":
             from core.scrapers.actress.gfriends import lookup_gfriends
-            return lookup_gfriends(name, None)
+            makers = _infer_gfriends_makers(name)
+            for candidate_name in names:
+                url = lookup_gfriends(candidate_name, makers)
+                if url:
+                    return url
+            return None
         elif source == "wiki":
             from core.scrapers.actress.wiki_ja import scrape_wiki_ja
-            r = scrape_wiki_ja(name)
-            return r.get("photo_url") if r else None
+            for candidate_name in names:
+                r = scrape_wiki_ja(candidate_name)
+                if r and r.get("photo_url"):
+                    return r.get("photo_url")
+            return None
+        elif source == "javdb":
+            from core.scrapers.javdb import scrape_javdb_actress_photo
+            for candidate_name in names:
+                url = scrape_javdb_actress_photo(candidate_name)
+                if url:
+                    return url
+            return None
         elif source == "minnano":
             from core.scrapers.actress.minnano_av import scrape_minnano_av
-            r = scrape_minnano_av(name)
-            return r.get("photo_url") if r else None
+            for candidate_name in names:
+                r = scrape_minnano_av(candidate_name)
+                if r and r.get("photo_url"):
+                    return r.get("photo_url")
+            return None
         else:
             return None
     except Exception as e:
         logger.warning("[actress] _fetch_single_source 失敗 source=%s: %s", source, e)
         return None
+
+
+def _actress_cloud_name_candidates(name: str) -> list[str]:
+    candidates = []
+
+    def add(value: Optional[str]):
+        value = str(value or "").strip()
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add(name)
+
+    try:
+        for alias in AliasRepository().resolve(name):
+            add(alias)
+    except Exception as e:
+        logger.warning("[actress] cloud name alias resolve failed: %s", e)
+
+    for candidate in list(candidates):
+        add(candidate.translate(_JAPANESE_NAME_VARIANTS))
+
+    return candidates
+
+
+def _infer_gfriends_makers(actress_name: str) -> Optional[list[str]]:
+    """
+    Infer makers from local videos so the picker can query gfriends with the same
+    kind of maker hints used during initial favorite creation.
+    """
+    try:
+        alias_repo = AliasRepository()
+        names = list(alias_repo.resolve(actress_name))
+    except Exception as e:
+        logger.warning("[actress] gfriends maker alias resolve failed: %s", e)
+        names = [actress_name]
+
+    try:
+        videos = VideoRepository().get_videos_by_actress_names(names)
+    except Exception as e:
+        logger.warning("[actress] gfriends maker video lookup failed: %s", e)
+        return None
+
+    prefix_map = load_prefix_mapping()
+    seen = set()
+    makers = []
+
+    def add_maker(maker: Optional[str]):
+        maker = str(maker or "").strip()
+        if maker and maker not in seen:
+            seen.add(maker)
+            makers.append(maker)
+
+    for video in videos:
+        add_maker(getattr(video, "maker", None))
+        number = str(getattr(video, "number", "") or "")
+        match = re.match(r"^([A-Za-z]+)", number)
+        if match:
+            add_maker(prefix_map.get(match.group(1).upper()))
+
+    return makers or None
+
+
+def _proxy_image_url(url: str) -> str:
+    return f"/api/proxy-image?url={quote(url, safe='')}"
 
 
 def _get_random_videos_with_covers(actress_name: str, count: int) -> list:
@@ -394,12 +516,11 @@ async def list_photo_candidates(name: str):
             content={"error": "not_found"}
         )
 
-    current_source = actress.photo_source
-    cloud_sources = [s for s in ["graphis", "gfriends", "wiki", "minnano"] if s != current_source]
+    cloud_sources = ["gfriends", "javdb", "graphis", "wiki", "minnano"]
 
     async def generate():
         total = 0
-        max_cloud = 3
+        max_cloud = 5
 
         # 雲端並行抓取
         async def fetch_source(src: str):
@@ -419,7 +540,7 @@ async def list_photo_candidates(name: str):
                 if url and total < max_cloud:
                     event_data = json.dumps({
                         "source": src,
-                        "thumb_url": url,
+                        "thumb_url": _proxy_image_url(url),
                         "full_url": url,
                     })
                     yield f"event: candidate\ndata: {event_data}\n\n"
@@ -492,14 +613,14 @@ async def actress_crop(path: str, spec: str = "v1"):
 # NOTE：必須定義在 GET /{name} 之前！
 # ---------------------------------------------------------------------------
 
-CLOUD_SOURCES = {"graphis", "gfriends", "wiki", "minnano"}
+CLOUD_SOURCES = {"graphis", "gfriends", "javdb", "wiki", "minnano"}
 
 
 @router.post("/{name}/photo")
 async def set_actress_photo(name: str, req: SetActressPhotoRequest):
     """
     設定女優照片。
-    - 雲端來源（graphis/gfriends/wiki/minnano）：下載並覆蓋本機照片
+    - 雲端來源（gfriends/javdb/graphis/wiki/minnano）：下載並覆蓋本機照片
     - local_crop：從影片封面 crop 後寫入 GFRIENDS_DIR
     覆蓋時先 glob 刪舊副檔名，再寫入新圖。
     更新 DB photo_source 欄位，回傳帶 cache-bust timestamp 的新 photo_url。
@@ -588,6 +709,7 @@ def get_actress(name: str):
     """
     init_db()
     repo = ActressRepository()
+    alias_repo = AliasRepository()
     actress = repo.get_by_name(name)
     if actress is None:
         return JSONResponse(
@@ -595,10 +717,11 @@ def get_actress(name: str):
             content={"error": "not_found"}
         )
 
+    video_count = repo.count_videos_for_actress_names(alias_repo.resolve(actress.name))
     return JSONResponse(
         status_code=200,
         content={
-            "actress": _actress_to_response(actress),
+            "actress": _actress_to_response(actress, video_count, alias_repo),
             "is_favorite": True,
         }
     )

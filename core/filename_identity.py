@@ -41,6 +41,20 @@ _QUALITY_TOKENS = {
     "60FPS",
 }
 
+_DATE_STYLE_NUMBER_RE = re.compile(r"^\d{6}[-_]\d{2,3}$")
+
+_SINGLE_LETTER_PREFIXES = {
+    "N",
+}
+
+_COMPACT_DISTINCT_PREFIXES = {
+    "RED",
+}
+
+_PREFIX_MIN_DIGITS = {
+    "ZMIN": 3,
+}
+
 
 @dataclass(frozen=True)
 class VariantFlags:
@@ -82,6 +96,15 @@ class _NumberMatch:
     fc2_digits: Optional[str] = None
 
 
+def _prefixed_number(prefix: str, digits: str) -> str:
+    prefix = str(prefix or "").upper()
+    digits = str(digits or "")
+    width = _PREFIX_MIN_DIGITS.get(prefix, 0)
+    if width and digits.isdigit():
+        digits = digits.zfill(width)
+    return f"{prefix}-{digits}"
+
+
 def filename_stem(value: str) -> str:
     """Return the basename without the final extension for POSIX/Windows paths."""
 
@@ -121,6 +144,9 @@ def build_source_queries(identity: MediaIdentity, source_id: str) -> list[str]:
         return []
 
     sid = (source_id or "default").lower()
+    if sid == "d2pass" and _DATE_STYLE_NUMBER_RE.match(identity.canonical_number):
+        return _dedupe([identity.search_number or identity.canonical_number])
+
     if not identity.canonical_number.startswith("FC2-PPV-"):
         return build_search_candidates(identity)
 
@@ -225,11 +251,25 @@ def _find_number_match(stem: str) -> Optional[_NumberMatch]:
     if mixed:
         return _NumberMatch(
             raw=stem[offset + mixed.start() : offset + mixed.end()],
-            canonical=f"{mixed.group(1)}-{mixed.group(2)}",
+            canonical=_prefixed_number(mixed.group(1), mixed.group(2)),
             start=offset + mixed.start(),
             end=offset + mixed.end(),
             kind="mixed",
         )
+
+    # Some older/catalog-specific codes use compact and hyphenated forms for
+    # different works.  Do not normalize RED155 into RED-155.
+    compact_distinct = re.search(r"(?<![A-Z0-9])([A-Z]{2,7})(\d{2,5})(?![A-Z0-9])", upper)
+    if compact_distinct:
+        prefix = compact_distinct.group(1)
+        if prefix in _COMPACT_DISTINCT_PREFIXES:
+            return _NumberMatch(
+                raw=stem[offset + compact_distinct.start() : offset + compact_distinct.end()],
+                canonical=f"{prefix}{compact_distinct.group(2)}",
+                start=offset + compact_distinct.start(),
+                end=offset + compact_distinct.end(),
+                kind="compact_distinct",
+            )
 
     repeated_general = re.search(
         r"(?<![A-Z0-9])([A-Z]{2,7})[-_]?(\d{2,5})(?=[A-Z]{2,7}[-_]?\d{2,5})",
@@ -240,7 +280,7 @@ def _find_number_match(stem: str) -> Optional[_NumberMatch]:
         if prefix not in _NOISE_PREFIXES:
             return _NumberMatch(
                 raw=stem[offset + repeated_general.start() : offset + repeated_general.end()],
-                canonical=f"{prefix}-{repeated_general.group(2)}",
+                canonical=_prefixed_number(prefix, repeated_general.group(2)),
                 start=offset + repeated_general.start(),
                 end=offset + repeated_general.end(),
                 kind="general",
@@ -251,7 +291,7 @@ def _find_number_match(stem: str) -> Optional[_NumberMatch]:
     if digit_prefix:
         return _NumberMatch(
             raw=stem[offset + digit_prefix.start() : offset + digit_prefix.end()],
-            canonical=f"{digit_prefix.group(1)}-{digit_prefix.group(2)}",
+            canonical=_prefixed_number(digit_prefix.group(1), digit_prefix.group(2)),
             start=offset + digit_prefix.start(),
             end=offset + digit_prefix.end(),
             kind="digit_prefix",
@@ -264,10 +304,20 @@ def _find_number_match(stem: str) -> Optional[_NumberMatch]:
             return None
         return _NumberMatch(
             raw=stem[offset + general.start() : offset + general.end()],
-            canonical=f"{prefix}-{general.group(2)}",
+            canonical=_prefixed_number(prefix, general.group(2)),
             start=offset + general.start(),
             end=offset + general.end(),
             kind="general",
+        )
+
+    single_letter = re.search(r"(?<![A-Z0-9])([A-Z])[-_]?(\d{3,5})(?![A-Z0-9])", upper)
+    if single_letter and single_letter.group(1) in _SINGLE_LETTER_PREFIXES:
+        return _NumberMatch(
+            raw=stem[offset + single_letter.start() : offset + single_letter.end()],
+            canonical=f"{single_letter.group(1)}-{single_letter.group(2)}",
+            start=offset + single_letter.start(),
+            end=offset + single_letter.end(),
+            kind="single_letter",
         )
 
     compact_variant = re.search(
@@ -279,7 +329,7 @@ def _find_number_match(stem: str) -> Optional[_NumberMatch]:
         if prefix not in _NOISE_PREFIXES:
             return _NumberMatch(
                 raw=stem[offset + compact_variant.start() : offset + compact_variant.end()],
-                canonical=f"{prefix}-{compact_variant.group(2)}",
+                canonical=_prefixed_number(prefix, compact_variant.group(2)),
                 start=offset + compact_variant.start(),
                 end=offset + compact_variant.end(),
                 kind="general",
@@ -298,6 +348,15 @@ def _strip_leading_web_prefix(stem: str) -> tuple[str, int]:
 
 def _number_aliases(match: _NumberMatch) -> list[str]:
     if match.kind != "fc2" or not match.fc2_digits:
+        if match.kind == "date":
+            separator_alias = (
+                match.canonical.replace("_", "-", 1)
+                if "_" in match.canonical
+                else match.canonical.replace("-", "_", 1)
+            )
+            return _dedupe([match.canonical, separator_alias])
+        if match.kind == "single_letter":
+            return _dedupe([match.canonical, re.sub(r"[^A-Z0-9]+", "", match.raw.upper())])
         return [match.canonical]
 
     digits = match.fc2_digits

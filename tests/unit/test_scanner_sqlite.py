@@ -202,6 +202,94 @@ class TestScanToSqlite:
         video = repo.get_all()[0]
         assert video.title == "修改後標題"
 
+    def test_part_video_uses_canonical_sidecar_after_regenerate(self, temp_db, temp_video_dir):
+        """AVOP-460-1.mp4 should keep AVOP-460.nfo/jpg across rescans."""
+        import time
+
+        video_path = create_video_file(temp_video_dir, "AVOP-460-1.mp4")
+        nfo_path = temp_video_dir / "AVOP-460.nfo"
+        cover_path = temp_video_dir / "AVOP-460.jpg"
+        nfo_path.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+    <title>Canonical Title</title>
+    <num>AVOP-460</num>
+    <maker>Studio</maker>
+</movie>
+""",
+            encoding="utf-8",
+        )
+        cover_path.write_bytes(b"cover")
+
+        scanner = VideoScanner()
+        first = scanner.scan_to_sqlite(str(temp_video_dir), temp_db)
+
+        repo = VideoRepository(temp_db)
+        video = repo.get_by_path(to_file_uri(str(video_path)))
+        assert first["inserted"] == 1
+        assert video.title == "Canonical Title"
+        assert video.number == "AVOP-460"
+        assert video.cover_path == to_file_uri(str(cover_path))
+        assert video.nfo_mtime == nfo_path.stat().st_mtime
+
+        time.sleep(0.1)
+        nfo_path.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+    <title>Canonical Title Updated</title>
+    <num>AVOP-460</num>
+    <maker>Studio</maker>
+</movie>
+""",
+            encoding="utf-8",
+        )
+
+        second = scanner.scan_to_sqlite(str(temp_video_dir), temp_db)
+        video = repo.get_by_path(to_file_uri(str(video_path)))
+        assert second["updated"] == 1
+        assert video.title == "Canonical Title Updated"
+        assert video.cover_path == to_file_uri(str(cover_path))
+
+    def test_scan_to_sqlite_discovers_centralized_sidecar_and_nfo_mtime(self, temp_db, temp_video_dir, tmp_path):
+        video_path = create_video_file(temp_video_dir, "ABC-123-C.mp4")
+        sidecar_root = tmp_path / "Metadata"
+        sidecar_dir = sidecar_root / "Real Studio" / "ABC-123"
+        sidecar_dir.mkdir(parents=True)
+        nfo_path = sidecar_dir / "ABC-123.nfo"
+        cover_path = sidecar_dir / "cover.jpg"
+        nfo_path.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<movie>
+    <title>Real Title</title>
+    <num>ABC-123</num>
+    <maker>Real Studio</maker>
+    <thumb>cover.jpg</thumb>
+</movie>
+""",
+            encoding="utf-8",
+        )
+        cover_path.write_bytes(b"cover")
+
+        scanner = VideoScanner(sidecar_config={
+            "sidecar": {
+                "mode": "centralized",
+                "root_dir": str(sidecar_root),
+                "layout": "{maker}/{num}",
+                "nfo_filename": "{num}.nfo",
+                "cover_filename": "cover.jpg",
+            }
+        })
+
+        result = scanner.scan_to_sqlite(str(temp_video_dir), temp_db)
+
+        repo = VideoRepository(temp_db)
+        video = repo.get_by_path(to_file_uri(str(video_path)))
+        assert result["inserted"] == 1
+        assert video.title == "Real Title"
+        assert video.maker == "Real Studio"
+        assert video.cover_path == to_file_uri(str(cover_path))
+        assert video.nfo_mtime == nfo_path.stat().st_mtime
+
     def test_scan_nonexistent_directory(self, temp_db):
         """測試掃描不存在的目錄"""
         scanner = VideoScanner()
