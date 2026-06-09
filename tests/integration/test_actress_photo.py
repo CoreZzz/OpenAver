@@ -70,7 +70,7 @@ def test_local_candidates_alias_expand_primary(client):
          patch('web.routers.actress.AliasRepository') as mock_alias_repo_cls, \
          patch('web.routers.actress.VideoRepository') as mock_video_repo_cls, \
          patch('web.routers.actress.init_db'), \
-         patch('web.routers.actress._fetch_single_source', return_value=None):
+         patch('web.routers.actress._fetch_source_photo_candidates', return_value=[]):
 
         # ActressRepository().get_by_name("alice") → mock_actress
         mock_actress_repo_cls.return_value.get_by_name.return_value = mock_actress
@@ -111,7 +111,7 @@ def test_local_candidates_alias_expand_via_alias(client):
          patch('web.routers.actress.AliasRepository') as mock_alias_repo_cls, \
          patch('web.routers.actress.VideoRepository') as mock_video_repo_cls, \
          patch('web.routers.actress.init_db'), \
-         patch('web.routers.actress._fetch_single_source', return_value=None):
+         patch('web.routers.actress._fetch_source_photo_candidates', return_value=[]):
 
         mock_actress_repo_cls.return_value.get_by_name.return_value = mock_actress
         mock_alias_repo_cls.return_value.resolve = mock_resolve
@@ -147,7 +147,7 @@ def test_local_candidates_no_alias_single_name(client):
          patch('web.routers.actress.AliasRepository') as mock_alias_repo_cls, \
          patch('web.routers.actress.VideoRepository') as mock_video_repo_cls, \
          patch('web.routers.actress.init_db'), \
-         patch('web.routers.actress._fetch_single_source', return_value=None):
+         patch('web.routers.actress._fetch_source_photo_candidates', return_value=[]):
 
         mock_actress_repo_cls.return_value.get_by_name.return_value = mock_actress
         mock_alias_repo_cls.return_value.resolve = mock_resolve
@@ -169,13 +169,13 @@ def test_local_candidates_no_alias_single_name(client):
 
 
 # ---------------------------------------------------------------------------
-# Case 4: 雲端路徑只收到 primary name（不被 alias 污染）
+# Case 4: 雲端路徑也展開 alias name
 # ---------------------------------------------------------------------------
 
-def test_cloud_sources_use_primary_name_only(client):
+def test_cloud_sources_expand_alias_names(client):
     """
-    雲端 scraper（gfriends / javdb / graphis / wiki / minnano）的 _fetch_single_source
-    應收到 URL path param（即 "alice"），不被 alias set 污染。
+    雲端 scraper（gfriends / javdb / graphis / wiki / minnano）會按 alias set
+    查詢，讓改名女優的不同頭像都能出現在候選池。
     """
     mock_actress = _make_mock_actress("alice")
     # photo_source=None → 所有雲端都在 cloud_sources
@@ -184,18 +184,14 @@ def test_cloud_sources_use_primary_name_only(client):
     mock_resolve = MagicMock(return_value={"alice", "bob", "cody"})
     mock_get_videos = MagicMock(return_value=[])
 
-    # 追蹤 _fetch_single_source 的呼叫
-    fetch_calls = []
-
-    def mock_fetch(name, src):
-        fetch_calls.append((name, src))
-        return None
+    def mock_fetch_for_name(name, src, makers=None):
+        return f"https://example.com/{src}/{name}.jpg"
 
     with patch('web.routers.actress.ActressRepository') as mock_actress_repo_cls, \
          patch('web.routers.actress.AliasRepository') as mock_alias_repo_cls, \
          patch('web.routers.actress.VideoRepository') as mock_video_repo_cls, \
          patch('web.routers.actress.init_db'), \
-         patch('web.routers.actress._fetch_single_source', side_effect=mock_fetch):
+         patch('web.routers.actress._fetch_source_for_name', side_effect=mock_fetch_for_name):
 
         mock_actress_repo_cls.return_value.get_by_name.return_value = mock_actress
         mock_alias_repo_cls.return_value.resolve = mock_resolve
@@ -204,8 +200,7 @@ def test_cloud_sources_use_primary_name_only(client):
         response = client.get("/api/actresses/alice/photo-candidates")
         assert response.status_code == 200
 
-    # 雲端呼叫的 name 參數必須全是 "alice"（URL param），不可是 alias
-    for name_arg, src_arg in fetch_calls:
-        assert name_arg == "alice", (
-            f"雲端 scraper '{src_arg}' 收到 '{name_arg}'，應只收到 'alice'（primary/URL param）"
-        )
+    events = _parse_sse(response.text)
+    candidates = [data for event, data in events if event == "candidate"]
+    query_names = {candidate.get("query_name") for candidate in candidates}
+    assert {"alice", "bob", "cody"}.issubset(query_names)

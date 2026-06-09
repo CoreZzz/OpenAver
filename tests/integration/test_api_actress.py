@@ -129,6 +129,82 @@ class TestAddFavorite:
         assert data["error"] == "already_exists"
         assert "actress" in data
 
+    def test_add_favorite_alias_profile_merges_existing_actress(self, client, tmp_db):
+        """alias returned by scraper should merge into an existing favorite."""
+        from core.database import Actress, ActressRepository, AliasRepository
+        from core.scrapers.actress.orchestrator import ProfileResult
+
+        repo = ActressRepository(tmp_db)
+        repo.save(
+            Actress(
+                name="葵",
+                birth="1994-12-03",
+                height="160cm",
+                cup="H",
+                bust=92,
+                waist=58,
+                hip=88,
+            )
+        )
+
+        profile = {
+            "name": "小野夕子",
+            "name_en": "Ono Yuko",
+            "text": {
+                "birth": "1994-12-03",
+                "height": "160cm",
+                "cup": "H",
+                "bust": "92cm",
+                "waist": "58cm",
+                "hip": "88cm",
+                "hometown": "秋田県",
+                "aliases": [
+                    {"ja": "葵", "hiragana": "あおい", "romaji": "Aoi"},
+                    {"ja": "湘南の女 夕子", "hiragana": "しょうなんのおんな ゆうこ"},
+                ],
+                "tags": ["美巨乳"],
+            },
+            "all_sources": {
+                "wiki": {
+                    "other_names": ["葵（旧名）"],
+                }
+            },
+            "photo_url": None,
+            "photo_source": "gfriends",
+            "primary_text_source": "minnano",
+        }
+
+        with patch("web.routers.actress.get_cached_profile", return_value=None), \
+             patch("web.routers.actress.get_actress_profile") as mock_get_profile, \
+             patch("web.routers.actress.download_actress_photo", return_value=False), \
+             patch("web.routers.actress.get_local_photo_path", return_value=None):
+
+            mock_get_profile.return_value = ProfileResult(data=profile, timed_out=False)
+            resp = client.post("/api/actresses/favorite", json={"name": "小野夕子"})
+
+        assert resp.status_code == 409
+        data = resp.json()
+        assert data["error"] == "already_exists"
+        assert data["merged"] is True
+        assert data["actress"]["name"] == "葵"
+        assert "小野夕子" in data["actress"]["aliases"]
+        assert "湘南の女 夕子" in data["actress"]["aliases"]
+
+        saved = repo.get_by_name("葵")
+        assert saved is not None
+        assert "小野夕子" in saved.aliases
+        assert "湘南の女 夕子" in saved.aliases
+        assert repo.get_by_name("小野夕子") is None
+
+        alias_record = AliasRepository(tmp_db).get_by_primary("葵")
+        assert alias_record is not None
+        assert "小野夕子" in alias_record.aliases
+        assert "湘南の女 夕子" in alias_record.aliases
+
+        alias_resp = client.get("/api/actresses/小野夕子")
+        assert alias_resp.status_code == 200
+        assert alias_resp.json()["actress"]["name"] == "葵"
+
     def test_add_favorite_not_found_returns_404(self, client):
         """orchestrator 回 data=None, timed_out=False → 404"""
         with patch("web.routers.actress.get_cached_profile", return_value=None), \
@@ -168,7 +244,7 @@ class TestAddFavorite:
              patch("web.routers.actress.get_actress_profile") as mock_get_profile, \
              patch("web.routers.actress.download_actress_photo", return_value=True), \
              patch("web.routers.actress.get_local_photo_path", return_value=None), \
-             patch("core.database.ActressRepository.count_videos_for_actress_names", return_value=5), \
+             patch("web.routers.actress._count_actress_work_cards", return_value=5), \
              patch("core.database.AliasRepository.resolve", return_value={ACTRESS_NAME}):
 
             from core.scrapers.actress.orchestrator import ProfileResult
@@ -337,9 +413,14 @@ class TestPhotoCandidates:
         self._save_actress(client)
 
         def mock_fetch(name, source):
-            return f"https://example.com/{source}/photo.jpg"
+            return [{
+                "source": source,
+                "query_name": name,
+                "thumb_url": f"/api/proxy-image?url=https%3A%2F%2Fexample.com%2F{source}%2Fphoto.jpg",
+                "full_url": f"https://example.com/{source}/photo.jpg",
+            }]
 
-        with patch("web.routers.actress._fetch_single_source", side_effect=mock_fetch), \
+        with patch("web.routers.actress._fetch_source_photo_candidates", side_effect=mock_fetch), \
              patch("web.routers.actress._get_random_videos_with_covers", return_value=[]):
             resp = client.get(f"/api/actresses/{ACTRESS_NAME}/photo-candidates")
 
@@ -375,7 +456,7 @@ class TestPhotoCandidates:
         fake_video.cover_path = "/fake/cover.jpg"
         fake_video.path = "/fake/video.mp4"
 
-        with patch("web.routers.actress._fetch_single_source", return_value=None), \
+        with patch("web.routers.actress._fetch_source_photo_candidates", return_value=[]), \
              patch("web.routers.actress._get_random_videos_with_covers", return_value=[fake_video]), \
              patch("web.routers.actress.to_file_uri", return_value=to_file_uri("/fake/video.mp4")):
             resp = client.get(f"/api/actresses/{ACTRESS_NAME}/photo-candidates")
@@ -395,7 +476,7 @@ class TestPhotoCandidates:
         """雲端全失敗 + 本機無影片 → done: {total: 0}"""
         self._save_actress(client)
 
-        with patch("web.routers.actress._fetch_single_source", return_value=None), \
+        with patch("web.routers.actress._fetch_source_photo_candidates", return_value=[]), \
              patch("web.routers.actress._get_random_videos_with_covers", return_value=[]):
             resp = client.get(f"/api/actresses/{ACTRESS_NAME}/photo-candidates")
 
@@ -417,9 +498,9 @@ class TestPhotoCandidates:
 
         def mock_fetch(name, source):
             called_sources.append(source)
-            return None
+            return []
 
-        with patch("web.routers.actress._fetch_single_source", side_effect=mock_fetch), \
+        with patch("web.routers.actress._fetch_source_photo_candidates", side_effect=mock_fetch), \
              patch("web.routers.actress._get_random_videos_with_covers", return_value=[]):
             client.get(f"/api/actresses/{ACTRESS_NAME}/photo-candidates")
 
@@ -433,9 +514,9 @@ class TestPhotoCandidates:
 
         def mock_fetch(name, source):
             called_sources.append(source)
-            return None
+            return []
 
-        with patch("web.routers.actress._fetch_single_source", side_effect=mock_fetch), \
+        with patch("web.routers.actress._fetch_source_photo_candidates", side_effect=mock_fetch), \
              patch("web.routers.actress._get_random_videos_with_covers", return_value=[]):
             resp = client.get(f"/api/actresses/{ACTRESS_NAME}/photo-candidates")
 
@@ -503,9 +584,9 @@ class TestPhotoCandidates:
 
         def mock_fetch(name, source):
             called_sources.append(source)
-            return None
+            return []
 
-        with patch("web.routers.actress._fetch_single_source", side_effect=mock_fetch), \
+        with patch("web.routers.actress._fetch_source_photo_candidates", side_effect=mock_fetch), \
              patch("web.routers.actress._get_random_videos_with_covers", return_value=[]):
             client.get(f"/api/actresses/{ACTRESS_NAME}/photo-candidates")
 

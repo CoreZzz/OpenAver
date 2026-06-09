@@ -319,7 +319,7 @@
                         </span>
                         <div class="av-card-preview-overlay">
                             <button class="btn-glass-circle"
-                                    @click.stop="playVideo(video.path)"
+                                    @click.stop="playVideo(video)"
                                     title="{{ t('showcase.action.play_video') }}">
                                 <i class="bi bi-play-fill"></i>
                             </button>
@@ -707,7 +707,7 @@
                                  similar-exit mode (path undefined) — regular lightbox items always have
                                  path so existing behavior is unaffected. -->
                             <div class="cover-actions" x-show="!!currentLightboxVideo?.path">
-                                <button class="lb-action-btn" @click="playVideo(currentLightboxVideo?.path)" data-tooltip="{{ t('showcase.action.play') }}" aria-label="{{ t('showcase.action.play') }}">
+                                <button class="lb-action-btn" @click="playVideo(currentLightboxVideo)" data-tooltip="{{ t('showcase.action.play') }}" aria-label="{{ t('showcase.action.play') }}">
                                     <i class="bi bi-play-fill"></i>
                                 </button>
                                 <button class="lb-action-btn" @click="openLocal(currentLightboxVideo?.path)" data-tooltip="{{ t('search.action.open_folder') }}" aria-label="{{ t('search.action.open_folder') }}">
@@ -959,7 +959,7 @@
                             <img :src="c.thumb_url" class="picker-candidate-img" loading="lazy" :alt="c.source">
                             <div class="picker-source-badge">
                                 <i class="bi bi-check-lg picker-check-icon"></i>
-                                <span x-text="t('showcase.actress.picker.source_' + c.source) || c.source"></span>
+                                <span x-text="(t('showcase.actress.picker.source_' + c.source) || c.source) + (c.query_name && c.query_name !== currentLightboxActress?.name ? ' · ' + c.query_name : '')"></span>
                             </div>
                         </div>
                     </template>
@@ -1227,7 +1227,7 @@
     <!-- TASK-52.3.3: Remove Actress Confirm Modal（取代原 window.confirm）
          Esc 雙重防線：handleKeydown 入口攔截 + dialog 自身 @keydown.escape.window 冗餘
          backdrop click 走 cancelRemoveActressModal() 統一三 dismiss 路徑 -->
-    <dialog class="modal fluent-modal"
+    <dialog class="modal fluent-modal remove-actress-dialog"
             :class="{ 'modal-open': removeActressModalOpen }"
             @click.self="cancelRemoveActressModal()"
             @keydown.escape.window="removeActressModalOpen && cancelRemoveActressModal()">

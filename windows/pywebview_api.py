@@ -6,6 +6,8 @@ import os
 import sys
 import json
 import subprocess
+import tempfile
+import time
 import webview
 from pathlib import Path
 from core.path_utils import uri_to_fs_path
@@ -14,6 +16,7 @@ from core.logger import get_logger
 from webview.dom import DOMEventHandler
 
 logger = get_logger(__name__)
+_PLAYLIST_MAX_AGE_SECONDS = 24 * 60 * 60
 
 # 支援的影片副檔名（from core.video_extensions Single Source of Truth）
 VIDEO_EXTENSIONS = set(DEFAULT_VIDEO_EXTENSIONS)
@@ -105,23 +108,52 @@ class Api:
         - C:/path/to/file.mp4
         - C:\\path\\to\\file.mp4
         """
-        path = uri_to_fs_path(path)
+        return self.open_files([path])
 
-        if not os.path.exists(path):
+    def open_files(self, paths):
+        """Open exactly the requested file set.
+
+        PotPlayer receives a temporary M3U8 playlist instead of a bare video
+        path because it may auto-add neighboring folder files for bare paths.
+        Other custom players keep the direct-path behavior.
+        """
+        if isinstance(paths, str):
+            raw_paths = [paths]
+        elif isinstance(paths, (list, tuple)):
+            raw_paths = list(paths)
+        else:
             return False
 
-        # 讀取設定，檢查是否有指定播放器
+        normalized_paths = []
+        seen = set()
+        for raw_path in raw_paths:
+            if not isinstance(raw_path, str) or not raw_path:
+                continue
+            path = uri_to_fs_path(raw_path)
+            if not os.path.exists(path) or path in seen:
+                continue
+            normalized_paths.append(path)
+            seen.add(path)
+
+        if not normalized_paths:
+            return False
+
         player = self._get_player_path()
 
         if player and os.path.exists(player):
             try:
-                subprocess.Popen([player, path])
+                if self._should_use_player_playlist(player):
+                    target_paths = [self._write_player_playlist(normalized_paths)]
+                else:
+                    target_paths = normalized_paths
+                subprocess.Popen([player, *target_paths])
                 return True
             except Exception as e:
-                logger.warning(f"[pywebview] custom player failed for {path!r} (player={player!r}): {e}; falling back to OS default")
-                pass  # fallback 到系統預設
+                logger.warning(f"[pywebview] custom player failed for {normalized_paths!r} (player={player!r}): {e}; falling back to OS default")
+                pass  # fallback to OS default
+        return self._open_default_path(normalized_paths[0])
 
-        # 跨平台開啟檔案
+    def _open_default_path(self, path: str) -> bool:
         try:
             if sys.platform == 'win32':
                 os.startfile(path)
@@ -133,6 +165,40 @@ class Api:
         except Exception as e:
             logger.error(f"[pywebview] open_file failed for {path!r}: {e}")
             return False
+
+    def _playlist_dir(self) -> Path:
+        return Path(tempfile.gettempdir()) / 'OpenAver' / 'playlists'
+
+    def _should_use_player_playlist(self, player: str) -> bool:
+        return 'potplayer' in Path(player).name.lower()
+
+    def _cleanup_old_playlists(self, playlist_dir: Path) -> None:
+        cutoff = time.time() - _PLAYLIST_MAX_AGE_SECONDS
+        try:
+            for playlist in playlist_dir.glob('openaver-*.m3u8'):
+                if playlist.stat().st_mtime < cutoff:
+                    playlist.unlink()
+        except Exception as e:
+            logger.warning(f"[pywebview] playlist cleanup failed: {e}")
+
+    def _write_player_playlist(self, paths: list[str]) -> str:
+        playlist_dir = self._playlist_dir()
+        playlist_dir.mkdir(parents=True, exist_ok=True)
+        self._cleanup_old_playlists(playlist_dir)
+
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            encoding='utf-8-sig',
+            newline='\n',
+            suffix='.m3u8',
+            prefix='openaver-',
+            dir=str(playlist_dir),
+            delete=False,
+        ) as playlist:
+            playlist.write('#EXTM3U\n')
+            for path in paths:
+                playlist.write(f'{path}\n')
+            return playlist.name
 
     def open_url(self, url: str) -> bool:
         """用系統預設瀏覽器開啟 URL

@@ -953,7 +953,7 @@ _TOOLS: list[dict] = [
         "description": (
             "串流回傳女優候選照片列表（SSE）。"
             "從 5 個雲端來源（gfriends/javdb/graphis/wiki/minnano）並行抓取，"
-            "加上本機影片封面 crop，最多 6 張。"
+            "加上本機影片封面 crop，最多 10 張。"
             "每張照片準備好立即 push，前端即時展示。不修改資料庫。"
         ),
         "side_effect": False,
@@ -971,7 +971,7 @@ _TOOLS: list[dict] = [
         },
         "output_schema": {
             "candidates": "SSE stream — event: candidate（重複 N 次）+ event: done",
-            "candidate_data": '{"source": str, "thumb_url": str, "full_url": str, "video_path"?: str}',
+            "candidate_data": '{"source": str, "query_name"?: str, "thumb_url": str, "full_url": str, "video_path"?: str}',
             "done_data": '{"total": int}',
         },
         "_example_template": "curl -N '{base}/api/actresses/%E4%B8%89%E4%B8%8A%E6%82%A0%E4%BA%9C/photo-candidates'",

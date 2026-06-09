@@ -794,14 +794,14 @@ export function stateSimilar() {
       if (targetNumber) {
         const found = _videos.find(v => v.number === targetNumber);
         if (found?.path) {
-          this.playVideo(found.path);
+          this.playVideo(found);
           return;
         }
       }
       // fallback：未 slip-through 過 + similarQueryVideo 無 number → 播 lightbox 原影片
       const path = this.currentLightboxVideo?.path;
       if (!path) return;  // graceful no-op，不 toast（避免重複錯誤訊息）
-      this.playVideo(path);
+      this.playVideo(this.currentLightboxVideo);
     },
 
     // ── 內部 helpers（T6/T7 carry-over，照搬 motion-lab）──────────────────

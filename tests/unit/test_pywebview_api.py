@@ -238,6 +238,37 @@ def test_open_file_os_default_oserror_logs_error(api_module, api_instance, monke
 # ---------------------------------------------------------------------------
 # Logger test 3: open_url — os.startfile raises OSError → logger.error
 # ---------------------------------------------------------------------------
+def test_open_files_custom_player_uses_exact_m3u8_playlist(api_module, api_instance, monkeypatch, tmp_path):
+    """custom player receives only the requested card files via M3U8."""
+    monkeypatch.setattr(sys, 'platform', 'win32')
+
+    player = tmp_path / 'PotPlayerMini64.exe'
+    video1 = tmp_path / 'SONE-103.mp4'
+    video2 = tmp_path / 'SONE-103-CD2.mp4'
+    player.write_text('', encoding='utf-8')
+    video1.write_text('', encoding='utf-8')
+    video2.write_text('', encoding='utf-8')
+
+    monkeypatch.setattr(api_instance, '_get_player_path', lambda: str(player))
+    monkeypatch.setattr(api_instance, '_playlist_dir', lambda: tmp_path / 'playlists')
+
+    mock_popen = MagicMock()
+    monkeypatch.setattr(api_module.subprocess, 'Popen', mock_popen)
+
+    result = api_instance.open_files([str(video1), str(video2), str(video1)])
+
+    assert result is True
+    popen_args = mock_popen.call_args[0][0]
+    assert popen_args[0] == str(player)
+    playlist_path = Path(popen_args[1])
+    assert playlist_path.suffix == '.m3u8'
+    assert playlist_path.read_text(encoding='utf-8-sig').splitlines() == [
+        '#EXTM3U',
+        str(video1),
+        str(video2),
+    ]
+
+
 def test_open_url_startfile_oserror_logs_error(api_module, api_instance, monkeypatch):
     """open_url で os.startfile が OSError → logger.error を呼び False を返す"""
     monkeypatch.setattr(sys, 'platform', 'win32')

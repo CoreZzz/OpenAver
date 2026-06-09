@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from core.path_utils import to_file_uri
+from web.routers.actress import _count_work_cards_for_videos
 from web.routers.showcase import _group_videos_by_work, _serialize_video
 
 
@@ -40,6 +41,16 @@ def test_showcase_groups_part_files_by_work_key(tmp_path):
     _, identity, files = grouped[0]
     assert identity.work_key == "SONE-103"
     assert {file["part_index"] for file in files} == {"1", "A"}
+
+
+def test_actress_video_count_uses_work_card_count(tmp_path):
+    videos = [
+        _video(tmp_path / "SONE-103-a.mp4"),
+        _video(tmp_path / "SONE-103-1.mp4"),
+        _video(tmp_path / "SONE-104.mp4", number="SONE-104"),
+    ]
+
+    assert _count_work_cards_for_videos(videos) == 2
 
 
 def test_showcase_serialized_video_exposes_files_and_variant_flags(tmp_path):

@@ -366,7 +366,7 @@
     height: 100%;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: start;
     color: var(--text-muted);
     font-size: 3rem;
 }
@@ -649,6 +649,10 @@
     visibility: visible;
     pointer-events: auto;
     transition-delay: 0s;
+}
+
+.remove-actress-dialog.modal {
+    z-index: 1600;
 }
 
 /* Lightbox Content Card — 垂直佈局（大圖上方 + metadata 下方） */
@@ -2409,6 +2413,9 @@ body.sidebar-collapsed .showcase-footer {
     gap: 20px;
     overflow-x: visible;             /* 覆寫全域 overflow-x: auto */
     overflow-y: visible;
+    overflow-x: auto;
+    max-width: 100%;
+    padding-bottom: 8px;
     margin-top: 0;                   /* V2 不再 -38px overlap */
 }
 
