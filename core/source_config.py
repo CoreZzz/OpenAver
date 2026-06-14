@@ -120,7 +120,7 @@ def get_builtin_sources() -> list[SourceConfig]:
             type='builtin',
             display_name_key=SOURCE_NAMES[sid],
             display_name_raw='',
-            enabled=(sid != 'theporndb'),
+            enabled=(sid not in {'theporndb', 'tokyohot'}),
             order=index,
             config={'api_token': ''} if sid == 'theporndb' else {},
             is_beta=False,

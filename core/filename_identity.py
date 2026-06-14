@@ -44,7 +44,13 @@ _QUALITY_TOKENS = {
 _DATE_STYLE_NUMBER_RE = re.compile(r"^\d{6}[-_]\d{2,3}$")
 
 _SINGLE_LETTER_PREFIXES = {
+    "K",
     "N",
+}
+
+_ALPHANUMERIC_SUFFIX_PREFIXES = {
+    "MKD",
+    "MKBD",
 }
 
 _COMPACT_DISTINCT_PREFIXES = {
@@ -144,8 +150,16 @@ def build_source_queries(identity: MediaIdentity, source_id: str) -> list[str]:
         return []
 
     sid = (source_id or "default").lower()
-    if sid == "d2pass" and _DATE_STYLE_NUMBER_RE.match(identity.canonical_number):
-        return _dedupe([identity.search_number or identity.canonical_number])
+    if sid == "d2pass":
+        if _DATE_STYLE_NUMBER_RE.match(identity.canonical_number):
+            return _dedupe([identity.search_number or identity.canonical_number])
+        if re.match(r"^[KN]-\d{4}$", identity.canonical_number):
+            compact = identity.canonical_number.replace("-", "")
+            return _dedupe([compact.lower(), compact, identity.canonical_number])
+
+    if sid in {"tokyohot", "metatube:tokyo-hot"} and re.match(r"^[KN]-\d{4}$", identity.canonical_number):
+        compact = identity.canonical_number.replace("-", "")
+        return _dedupe([compact.lower(), compact, identity.canonical_number])
 
     if not identity.canonical_number.startswith("FC2-PPV-"):
         return build_search_candidates(identity)
@@ -244,6 +258,19 @@ def _find_number_match(stem: str) -> Optional[_NumberMatch]:
             start=offset + heyzo.start(),
             end=offset + heyzo.end(),
             kind="heyzo",
+        )
+
+    alphanumeric_suffix = re.search(
+        r"(?<![A-Z0-9])([A-Z]{2,7})[-_]?([A-Z]\d{2,4})(?![A-Z0-9])",
+        upper,
+    )
+    if alphanumeric_suffix and alphanumeric_suffix.group(1) in _ALPHANUMERIC_SUFFIX_PREFIXES:
+        return _NumberMatch(
+            raw=stem[offset + alphanumeric_suffix.start() : offset + alphanumeric_suffix.end()],
+            canonical=f"{alphanumeric_suffix.group(1)}-{alphanumeric_suffix.group(2)}",
+            start=offset + alphanumeric_suffix.start(),
+            end=offset + alphanumeric_suffix.end(),
+            kind="alphanumeric_suffix",
         )
 
     # T28-103 and similar letter+digit prefixes.
@@ -357,6 +384,8 @@ def _number_aliases(match: _NumberMatch) -> list[str]:
             return _dedupe([match.canonical, separator_alias])
         if match.kind == "single_letter":
             return _dedupe([match.canonical, re.sub(r"[^A-Z0-9]+", "", match.raw.upper())])
+        if match.kind == "alphanumeric_suffix":
+            return _dedupe([match.canonical, match.canonical.replace("-", "")])
         return [match.canonical]
 
     digits = match.fc2_digits

@@ -8,7 +8,7 @@
 /**
  * 來源順序（從後端 API 載入，此為預設值）
  */
-let SOURCE_ORDER = ['dmm', 'javbus', 'jav321', 'javdb', 'missav', 'd2pass', 'heyzo', 'fc2', 'avsox', 'theporndb'];
+let SOURCE_ORDER = ['dmm', 'javbus', 'jav321', 'javdb', 'missav', 'd2pass', 'heyzo', 'tokyohot', 'fc2', 'avsox', 'theporndb'];
 
 /**
  * 來源顯示名稱對照
@@ -21,6 +21,7 @@ let SOURCE_NAMES = {
     'missav':  'MissAV',
     'd2pass':  'D2Pass',
     'heyzo':   'HEYZO',
+    'tokyohot': 'Tokyo-Hot',
     'fc2':     'FC2',
     'avsox':   'AVSOX',
     'theporndb': 'ThePornDB',

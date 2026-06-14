@@ -205,6 +205,24 @@ class TestAddFavorite:
         assert alias_resp.status_code == 200
         assert alias_resp.json()["actress"]["name"] == "葵"
 
+    def test_add_favorite_existing_alias_returns_409_without_scrape(self, client, tmp_db):
+        """If requested name is an existing favorite alias, do not scrape or 404."""
+        from core.database import Actress, ActressRepository, AliasRepository
+
+        repo = ActressRepository(tmp_db)
+        repo.save(Actress(name="葵", aliases=["小野夕子"]))
+        AliasRepository(tmp_db).sync_from_favorite("葵", ["小野夕子"])
+
+        with patch("web.routers.actress.get_cached_profile") as mock_cache, \
+             patch("web.routers.actress.get_actress_profile") as mock_get_profile:
+            resp = client.post("/api/actresses/favorite", json={"name": "小野夕子"})
+
+        assert resp.status_code == 409
+        assert resp.json()["error"] == "already_exists"
+        assert resp.json()["actress"]["name"] == "葵"
+        mock_cache.assert_not_called()
+        mock_get_profile.assert_not_called()
+
     def test_add_favorite_not_found_returns_404(self, client):
         """orchestrator 回 data=None, timed_out=False → 404"""
         with patch("web.routers.actress.get_cached_profile", return_value=None), \
@@ -218,6 +236,47 @@ class TestAddFavorite:
         assert resp.status_code == 404
         data = resp.json()
         assert data["error"] == "not_found"
+
+    def test_add_favorite_falls_back_to_local_videos(self, client, tmp_path):
+        """cloud profile miss + local videos for actress → create minimal favorite."""
+        from core.database import Video, VideoRepository
+        from core.scrapers.actress.orchestrator import ProfileResult
+
+        cover_path = tmp_path / "fc2-2390869-cover.jpg"
+        cover_path.write_bytes(b"\xff\xd8\xff\xe0fake_cover")
+        video_path = tmp_path / "FC2-PPV-2390869.mp4"
+        VideoRepository().upsert(Video(
+            path=to_file_uri(str(video_path)),
+            number="FC2-PPV-2390869",
+            title="杏ちゃん史上最高にエロくて超敏感",
+            actresses=["水希杏"],
+            maker="ザ・流し屋",
+            cover_path=to_file_uri(str(cover_path)),
+        ))
+
+        with patch("web.routers.actress.get_cached_profile", return_value=None), \
+             patch("web.routers.actress.get_actress_profile") as mock_get_profile:
+            mock_get_profile.return_value = ProfileResult(data=None, timed_out=False)
+            resp = client.post("/api/actresses/favorite", json={"name": "水希杏"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["photo_downloaded"] is False
+        actress = data["actress"]
+        assert actress["name"] == "水希杏"
+        assert actress["primary_text_source"] == "local"
+        assert actress["photo_source"] == "local_crop"
+        assert actress["video_count"] == 1
+
+        with patch("web.routers.actress._fetch_source_photo_candidates", return_value=[]):
+            candidates_resp = client.get("/api/actresses/水希杏/photo-candidates")
+
+        assert candidates_resp.status_code == 200
+        events = _parse_sse_events(candidates_resp.text)
+        candidates = [e for e in events if e["event"] == "candidate"]
+        assert candidates
+        assert candidates[0]["data"]["source"] == "local_crop"
 
     def test_add_favorite_timeout_returns_504(self, client):
         """orchestrator 超時 → 504"""
@@ -711,6 +770,40 @@ class TestSetActressPhoto:
         data = resp.json()
         assert data["photo_source"] == "local_crop"
         assert "?t=" in data["photo_url"]
+
+    def test_set_actress_photo_local_crop_matches_alias_video(self, client, tmp_path):
+        """local_crop should match videos listed under an actress alias."""
+        from core.database import Actress, ActressRepository, AliasRepository, Video, VideoRepository
+
+        ActressRepository().save(Actress(name="葵", aliases=["小野夕子"]))
+        AliasRepository().sync_from_favorite("葵", ["小野夕子"])
+
+        video_path = tmp_path / "alias-video.mp4"
+        cover_path = tmp_path / "alias-cover.jpg"
+        cover_path.write_bytes(b"\xff\xd8\xff\xe0fake_cover")
+        VideoRepository().upsert(Video(
+            path=to_file_uri(str(video_path)),
+            title="Alias Video",
+            actresses=["小野夕子"],
+            cover_path=to_file_uri(str(cover_path)),
+        ))
+
+        fake_jpeg = b"\xff\xd8\xff\xe0FAKE_ALIAS_CROP"
+
+        with patch("web.routers.actress.crop_video_cover", return_value=fake_jpeg), \
+             patch("web.routers.actress.GFRIENDS_DIR") as mock_dir:
+            mock_dir.__truediv__ = lambda self, other: tmp_path / other
+            mock_dir.mkdir = lambda **kw: None
+            mock_dir.glob = lambda pattern: []
+            resp = client.post(
+                "/api/actresses/葵/photo",
+                json={"source": "local_crop", "video_path": to_file_uri(str(video_path))},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["photo_source"] == "local_crop"
+        assert data["photo_url"].startswith("/api/actresses/photo/")
 
     # ---- 錯誤處理 ----
 

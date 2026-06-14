@@ -9,6 +9,7 @@ from .fc2 import FC2Scraper
 from .avsox import AVSOXScraper
 from .d2pass import D2PassScraper
 from .heyzo import HEYZOScraper
+from .tokyohot import TokyoHotScraper
 from .dmm import DMMScraper
 from .theporndb import ThePornDBScraper
 from .utils import extract_number
@@ -26,6 +27,7 @@ __all__ = [
     'AVSOXScraper',
     'D2PassScraper',
     'HEYZOScraper',
+    'TokyoHotScraper',
     'DMMScraper',
     'ThePornDBScraper',
     'extract_number',

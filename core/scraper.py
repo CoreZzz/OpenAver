@@ -20,7 +20,7 @@ from core.scrapers import (
     JavBusScraper, JAV321Scraper, JavDBScraper,
     MissAVScraper,
     FC2Scraper, AVSOXScraper,
-    D2PassScraper, HEYZOScraper, DMMScraper,
+    D2PassScraper, HEYZOScraper, TokyoHotScraper, DMMScraper,
     ThePornDBScraper,
     Video, ScraperConfig, BaseScraper
 )
@@ -64,6 +64,15 @@ SCRAPER_CLASSES: List[Type[BaseScraper]] = [
 _LOCALE_TO_JAVBUS = {"zh-TW": "zh-tw", "zh-CN": "zh-tw", "ja": "ja", "en": "en"}
 
 
+_AVSOX_UNCENSORED_PREFIXES = {"MKBD", "MKD"}
+
+
+def _is_avsox_uncensored_number(value: str) -> bool:
+    text = str(value or "").strip().upper()
+    match = re.fullmatch(r"([A-Z]{2,7})-[A-Z]\d{2,4}", text)
+    return bool(match and match.group(1) in _AVSOX_UNCENSORED_PREFIXES)
+
+
 def _get_javbus_lang() -> str:
     """從 config 讀取 locale 並轉換為 JavBus lang code"""
     try:
@@ -100,6 +109,9 @@ def is_number_format(s: str) -> bool:
         r'[-_](UC|UNCEN|UNCENSORED|LEAK|LEAKED)(?=[-_.\s]|$)',
         '', s, flags=re.IGNORECASE
     )
+    identity = parse_media_identity(s)
+    if identity.canonical_number and _is_avsox_uncensored_number(identity.canonical_number):
+        return True
     return bool(re.match(r'^[a-zA-Z]+-?\d{3,}$', s))
 
 
@@ -399,6 +411,8 @@ _CENSORED_EXACT_BUILTINS = {"dmm", "javbus", "jav321", "javdb", "missav"}
 _FC2_EXACT_BUILTINS = {"fc2", "avsox", "javdb", "missav"}
 _HEYZO_EXACT_BUILTINS = {"heyzo", "avsox", "javdb", "missav"}
 _DATE_UNCENSORED_EXACT_BUILTINS = {"d2pass", "heyzo", "fc2", "avsox", "javdb", "missav"}
+_TOKYO_HOT_EXACT_BUILTINS = {"tokyohot", "d2pass", "javdb", "missav"}
+_AVSOX_UNCENSORED_EXACT_BUILTINS = {"avsox", "javdb", "missav"}
 _TITLE_EXACT_BUILTINS = {"theporndb", "javdb"}
 _FC2_METATUBE_PROVIDERS = {"fc2", "fc2ppvdb", "fc2hub"}
 _DATE_METATUBE_PROVIDERS = {p.lower() for p in METATUBE_DATE_UNCENSORED}
@@ -429,6 +443,10 @@ def _query_kind(identity) -> str:
         return "fc2"
     if number.startswith("HEYZO-"):
         return "heyzo"
+    if re.match(r"^[NK]-\d{4}$", number):
+        return "tokyo_hot"
+    if _is_avsox_uncensored_number(number):
+        return "avsox_uncensored"
     if re.match(r"^\d{6}[-_]\d{2,3}$", number):
         return "date_uncensored"
     return "censored"
@@ -447,6 +465,10 @@ def _source_allowed_for_query_kind(source_id: str, kind: str) -> bool:
             return provider in _FC2_METATUBE_PROVIDERS
         if kind == "heyzo":
             return provider == "heyzo"
+        if kind == "tokyo_hot":
+            return provider == "tokyo-hot"
+        if kind == "avsox_uncensored":
+            return False
         if kind == "date_uncensored":
             return provider in _DATE_METATUBE_PROVIDERS
         if kind == "title":
@@ -460,6 +482,8 @@ def _source_allowed_for_query_kind(source_id: str, kind: str) -> bool:
         "fc2": _FC2_EXACT_BUILTINS,
         "heyzo": _HEYZO_EXACT_BUILTINS,
         "date_uncensored": _DATE_UNCENSORED_EXACT_BUILTINS,
+        "tokyo_hot": _TOKYO_HOT_EXACT_BUILTINS,
+        "avsox_uncensored": _AVSOX_UNCENSORED_EXACT_BUILTINS,
         "title": _TITLE_EXACT_BUILTINS,
     }.get(kind, _CENSORED_EXACT_BUILTINS)
     return source_id in allowed
@@ -661,6 +685,7 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '',
         'missav': lambda: [MissAVScraper(ScraperConfig(proxy_url=_dmm_proxy_url(proxy_url)))],
         'd2pass': lambda: [D2PassScraper()],
         'heyzo': lambda: [HEYZOScraper()],
+        'tokyohot': lambda: [TokyoHotScraper()],
         'fc2': lambda: [FC2Scraper()],
         'avsox': lambda: [AVSOXScraper()],
         'theporndb': lambda: [ThePornDBScraper(api_token=_get_theporndb_token())],
@@ -689,8 +714,15 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '',
         # - metatube：defer 到 ThreadPoolExecutor 並行（bounded parallel fan-out）
         # - 結果以 enabled_sids 順序重建 all_data（保全 user-drag merge 優先度）
         # get_enabled_source_ids 傳入 availability_map 讓 metatube gate 生效（🔴 CRITICAL）
+        query_kind = _query_kind(identity)
         enabled_sids = get_enabled_source_ids(availability_map=metatube_state.availability_map())
         enabled_sids = _filter_auto_sources_for_query(enabled_sids, identity)
+        if query_kind in {"fc2", "heyzo", "date_uncensored", "tokyo_hot", "avsox_uncensored"}:
+            uncensored_sids = [
+                sid for sid in _get_uncensored_sources(number)
+                if _source_allowed_for_query_kind(sid, query_kind)
+            ]
+            enabled_sids = list(dict.fromkeys([*uncensored_sids, *enabled_sids]))
         skip_sources = set(_skip_sources or set())
         if skip_sources:
             enabled_sids = [sid for sid in enabled_sids if sid not in skip_sources]
@@ -719,7 +751,8 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '',
                     continue
             return found
 
-        for priority_sid in ('javdb', 'missav'):
+        priority_sids = () if query_kind in {"fc2", "heyzo", "date_uncensored", "tokyo_hot", "avsox_uncensored"} else ('javdb', 'missav')
+        for priority_sid in priority_sids:
             if priority_sid not in enabled_sids:
                 continue
             priority_result = run_builtin_source(priority_sid)
@@ -1330,6 +1363,7 @@ def _get_uncensored_sources(search_term: str) -> list[str]:
     prepend 到 builtin 清單前；fallback builtin 順序不變：
     - FC2 前綴 → metatube(FC2/FC2PPVDB/fc2hub) + ['fc2', 'avsox']
     - HEYZO 前綴 → metatube(HEYZO) + ['heyzo', 'avsox']
+    - N/K 短编号（TOKYO-HOT）→ metatube:TOKYO-HOT + ['tokyohot', 'd2pass']
     - 其他（D2Pass 日期格式等）→ metatube(日期型 11) + ['d2pass', 'heyzo', 'fc2', 'avsox']
 
     無任何 metatube 無碼源啟用 → mt_pick=[] → 回傳純 builtin（與 B1 行為一致）。
@@ -1352,6 +1386,12 @@ def _get_uncensored_sources(search_term: str) -> list[str]:
     elif term_lower.startswith('heyzo'):
         builtin = ['heyzo', 'avsox']
         mt_pick = [s for s in mt_enabled if s == 'metatube:HEYZO']
+    elif re.match(r'^[nk]-?\d{4}$', term_lower, flags=re.IGNORECASE):
+        builtin = ['tokyohot', 'd2pass']
+        mt_pick = [s for s in mt_enabled if s.lower() == 'metatube:tokyo-hot']
+    elif _is_avsox_uncensored_number(normalize_number(search_term)):
+        builtin = ['avsox']
+        mt_pick = []
     else:
         builtin = ['d2pass', 'heyzo', 'fc2', 'avsox']
         mt_pick = [s for s in mt_enabled
@@ -1379,6 +1419,23 @@ def _try_uncensored_exact_first(
     return None
 
 
+def _try_generic_exact_fallback(
+    query: str,
+    proxy_url: str = '',
+    status_callback: Optional[Callable[[str, str], None]] = None,
+) -> Optional[Dict[str, Any]]:
+    result = _try_javdb_first(query, proxy_url=proxy_url, status_callback=status_callback)
+    if result:
+        result['_mode'] = 'uncensored'
+        return result
+
+    result = _try_missav_first(query, proxy_url=proxy_url, status_callback=status_callback)
+    if result:
+        result['_mode'] = 'uncensored'
+        return result
+    return None
+
+
 def smart_search(query: str, limit: int = 20, offset: int = 0, status_callback: Optional[Callable[[str, str], None]] = None, uncensored_mode: bool = False, proxy_url: str = '', result_callback: Optional[Callable[[int, Any], None]] = None, discovery_only: bool = False) -> List[Dict[str, Any]]:
     """
     智慧搜尋：自動判斷搜尋類型並執行
@@ -1400,47 +1457,36 @@ def smart_search(query: str, limit: int = 20, offset: int = 0, status_callback: 
     if uncensored_mode:
         if status_callback:
             status_callback('mode', 'uncensored')
-        result = _try_javdb_first(query, proxy_url=proxy_url, status_callback=status_callback)
-        if result:
-            result['_mode'] = 'uncensored'
-            if status_callback:
-                status_callback('done', 'found:1')
-            return [result]
-        result = _try_missav_first(query, proxy_url=proxy_url, status_callback=status_callback)
-        if result:
-            result['_mode'] = 'uncensored'
-            if status_callback:
-                status_callback('done', 'found:1')
-            return [result]
         result = _try_uncensored_exact_first(query, proxy_url=proxy_url, status_callback=status_callback)
+        if result:
+            if status_callback:
+                status_callback('done', 'found:1')
+            return [result]
+        result = _try_generic_exact_fallback(query, proxy_url=proxy_url, status_callback=status_callback)
         if result:
             if status_callback:
                 status_callback('done', 'found:1')
             return [result]
 
     # 0. 無碼特殊處理 - 自動偵測（FC2 / HEYZO / 日期-編號格式）
+    query_kind = _query_kind(parse_media_identity(query))
     is_uncensored = (
         query.lower().strip().startswith('fc2') or
         query.lower().strip().startswith('heyzo') or
         re.match(r'^\d{6}-\d{2,}$', query) or
-        re.match(r'^\d{6}_\d{2,}$', query)
+        re.match(r'^\d{6}_\d{2,}$', query) or
+        re.match(r'^[nk]-?\d{4}$', query, flags=re.IGNORECASE) or
+        query_kind in {"fc2", "heyzo", "date_uncensored", "tokyo_hot", "avsox_uncensored"}
     )
     if is_uncensored:
         if status_callback:
             status_callback('mode', 'uncensored')
-        result = _try_javdb_first(query, proxy_url=proxy_url, status_callback=status_callback)
-        if result:
-            result['_mode'] = 'uncensored'
-            if status_callback:
-                status_callback('done', 'found:1')
-            return [result]
-        result = _try_missav_first(query, proxy_url=proxy_url, status_callback=status_callback)
-        if result:
-            result['_mode'] = 'uncensored'
-            if status_callback:
-                status_callback('done', 'found:1')
-            return [result]
         result = _try_uncensored_exact_first(query, proxy_url=proxy_url, status_callback=status_callback)
+        if result:
+            if status_callback:
+                status_callback('done', 'found:1')
+            return [result]
+        result = _try_generic_exact_fallback(query, proxy_url=proxy_url, status_callback=status_callback)
         if result:
             if status_callback:
                 status_callback('done', 'found:1')

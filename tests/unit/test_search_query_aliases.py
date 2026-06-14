@@ -72,6 +72,24 @@ def test_search_scraper_d2pass_keeps_date_separator_exact():
     assert identity.canonical_number == "102318_778"
 
 
+def test_search_scraper_d2pass_single_letter_uses_compact_site_id_first():
+    identity = parse_media_identity("n0783.mp4")
+    fake = FakeScraper("n0783")
+
+    result = scraper._search_scraper_with_queries(
+        fake,
+        "d2pass",
+        "N-0783",
+        identity,
+        try_all_aliases=True,
+        max_queries=3,
+    )
+
+    assert result == {"number": "n0783"}
+    assert fake.calls == ["n0783"]
+    assert identity.canonical_number == "N-0783"
+
+
 def test_search_scraper_javdb_retries_date_separator_alias_without_changing_canonical():
     identity = parse_media_identity("102318_778.mp4")
     fake = FakeScraper("102318-778")

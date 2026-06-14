@@ -49,6 +49,7 @@
     "dmm": true,
     "d2pass": true,
     "heyzo": true,
+    "tokyohot": true,
     "fc2": true,
     "javbus": false,
     "jav321": false,
@@ -185,12 +186,25 @@
       "is_censored": false
     },
     {
+      "id": "tokyohot",
+      "type": "builtin",
+      "display_name_key": "Tokyo-Hot",
+      "display_name_raw": "",
+      "enabled": false,
+      "order": 7,
+      "config": {},
+      "is_beta": false,
+      "manual_only": false,
+      "requires_proxy": false,
+      "is_censored": false
+    },
+    {
       "id": "fc2",
       "type": "builtin",
       "display_name_key": "FC2",
       "display_name_raw": "",
       "enabled": true,
-      "order": 7,
+      "order": 8,
       "config": {},
       "is_beta": false,
       "manual_only": false,
@@ -203,7 +217,7 @@
       "display_name_key": "AVSOX",
       "display_name_raw": "",
       "enabled": true,
-      "order": 8,
+      "order": 9,
       "config": {},
       "is_beta": false,
       "manual_only": false,
@@ -216,7 +230,7 @@
       "display_name_key": "ThePornDB",
       "display_name_raw": "",
       "enabled": false,
-      "order": 9,
+      "order": 10,
       "config": {
         "api_token": ""
       },

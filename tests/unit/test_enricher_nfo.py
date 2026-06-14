@@ -101,6 +101,17 @@ def test_merge_meta_replaces_local_cover_path_with_remote_scraper_cover():
     assert merged["cover_url"] == "https://www.1pondo.tv/moviepages/041021_001/images/str.jpg"
 
 
+def test_merge_meta_fills_missing_duration_from_scraper():
+    merged, filled = _merge_meta(
+        {"title": "Existing", "duration": None},
+        {"duration": 45},
+        number="FC2-PPV-2240347",
+    )
+
+    assert merged["duration"] == 45
+    assert "duration" in filled
+
+
 # ─── _write_nfo 讀 canonical key 傳 generate_nfo ───
 
 def test_write_nfo_passes_canonical_summary_rating(tmp_path):
@@ -195,6 +206,37 @@ def test_write_cover_uses_centralized_sidecar_paths(tmp_path):
         ) is True
 
     assert Path(mock_download.call_args.args[1]) == sidecar_root / "ABC-123" / "cover.jpg"
+
+
+def test_write_cover_falls_back_to_local_video_frame_when_remote_fails(tmp_path):
+    fs_path = tmp_path / "media" / "vid.mp4"
+    fs_path.parent.mkdir()
+    fs_path.write_bytes(b"video")
+    sidecar_root = tmp_path / "Metadata"
+    config = {
+        "sidecar": {
+            "mode": "centralized",
+            "root_dir": str(sidecar_root),
+            "layout": "{num}",
+            "cover_filename": "cover.jpg",
+        }
+    }
+
+    with (
+        patch("core.enricher.download_image", return_value=False),
+        patch("core.enricher._write_video_frame_cover", return_value=True) as mock_frame,
+    ):
+        assert _write_cover(
+            str(fs_path),
+            "https://example.test/missing.jpg",
+            write_cover=True,
+            overwrite_existing=True,
+            number="ABC-123",
+            meta={},
+            sidecar_config=config,
+        ) is True
+
+    assert Path(mock_frame.call_args.args[1]) == sidecar_root / "ABC-123" / "cover.jpg"
 
 
 def test_enrich_single_syncs_existing_sidecar_cover_for_complete_db_meta(tmp_path):
@@ -600,6 +642,94 @@ def test_enrich_single_syncs_configured_title_override_to_existing_sidecar(tmp_p
     assert (root.findtext("title") or "").strip() == "3P中出後吞下精液"
     assert (root.findtext("originaltitle") or "").strip() == "3Pで中出しされたザーメンをごっくん"
     assert actors == ["新城由衣", "椎名明日香"]
+
+
+def test_enrich_single_syncs_duration_url_and_cover_override_to_existing_sidecar(tmp_path):
+    import xml.etree.ElementTree as ET
+
+    from core.database import Video, VideoRepository, init_db
+    from core.enricher import enrich_single
+    from core.path_utils import to_file_uri
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    repo = VideoRepository(db_path)
+    video_path = tmp_path / "media" / "ABC-123.mp4"
+    video_path.parent.mkdir()
+    video_path.write_bytes(b"video")
+
+    sidecar_root = tmp_path / "Metadata"
+    sidecar_dir = sidecar_root / "Studio" / "ABC-123"
+    sidecar_dir.mkdir(parents=True)
+    nfo_path = sidecar_dir / "ABC-123.nfo"
+    nfo_path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<movie>
+  <title>Old Title</title>
+  <studio>Studio</studio>
+  <thumb>cover.jpg</thumb>
+  <runtime></runtime>
+  <website></website>
+  <cover></cover>
+  <num>ABC-123</num>
+</movie>
+""",
+        encoding="utf-8",
+    )
+    cover_path = sidecar_dir / "cover.jpg"
+    cover_path.write_bytes(b"cover")
+    path_uri = to_file_uri(str(video_path))
+
+    repo.upsert(Video(
+        path=path_uri,
+        number="ABC-123",
+        title="Old Title",
+        actresses=[],
+        maker="Studio",
+        cover_path="",
+        nfo_mtime=0.0,
+    ))
+
+    config = {
+        "sidecar": {
+            "mode": "centralized",
+            "root_dir": str(sidecar_root),
+            "layout": "{maker}/{num}",
+            "nfo_filename": "{num}.nfo",
+            "cover_filename": "cover.jpg",
+        },
+        "metadata_overrides": [
+            {
+                "numbers": ["ABC-123"],
+                "actresses": ["Actor"],
+                "duration": 81,
+                "url": "https://example.com/abc-123",
+                "cover_url": "https://example.com/cover.jpg",
+            }
+        ],
+    }
+
+    with patch("core.enricher.VideoRepository", return_value=repo), \
+         patch("core.enricher.search_jav", return_value=None) as mock_search:
+        result = enrich_single(
+            file_path=path_uri,
+            number="ABC-123",
+            mode="fill_missing",
+            write_nfo=True,
+            write_cover=True,
+            sidecar_config=config,
+        )
+
+    fetched = repo.get_by_path(path_uri)
+    root = ET.parse(nfo_path).getroot()
+    assert result.success is True
+    mock_search.assert_not_called()
+    assert fetched.actresses == ["Actor"]
+    assert fetched.duration == 81
+    assert fetched.cover_path == to_file_uri(str(cover_path))
+    assert (root.findtext("runtime") or "").strip() == "81"
+    assert (root.findtext("website") or "").strip() == "https://example.com/abc-123"
+    assert (root.findtext("cover") or "").strip() == "cover.jpg"
 
 
 def test_enrich_single_removes_fc2_seller_actor_from_existing_sidecar(tmp_path):

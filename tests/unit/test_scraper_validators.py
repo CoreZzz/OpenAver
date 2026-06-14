@@ -144,7 +144,7 @@ class TestIsPrefixOnly:
 _SCRAPER_ATTRS = [
     'DMMScraper', 'JavBusScraper', 'JAV321Scraper', 'JavDBScraper',
     'MissAVScraper',
-    'D2PassScraper', 'HEYZOScraper', 'FC2Scraper', 'AVSOXScraper',
+    'D2PassScraper', 'HEYZOScraper', 'TokyoHotScraper', 'FC2Scraper', 'AVSOXScraper',
     'ThePornDBScraper',
 ]
 
@@ -157,6 +157,7 @@ _ID_TO_ATTR = {
     'missav': 'MissAVScraper',
     'd2pass': 'D2PassScraper',
     'heyzo': 'HEYZOScraper',
+    'tokyohot': 'TokyoHotScraper',
     'fc2': 'FC2Scraper',
     'avsox': 'AVSOXScraper',
     'theporndb': 'ThePornDBScraper',
@@ -294,7 +295,7 @@ class TestAutoFanOutQueryRouting:
             'get_enabled_source_ids',
             lambda availability_map=None: [
                 'dmm', 'javbus', 'jav321', 'javdb', 'missav',
-                'd2pass', 'heyzo', 'fc2', 'avsox', 'theporndb',
+                'd2pass', 'heyzo', 'tokyohot', 'fc2', 'avsox', 'theporndb',
             ],
         )
 
@@ -304,7 +305,7 @@ class TestAutoFanOutQueryRouting:
         assert constructed['JAV321Scraper'] == 1
         assert constructed['JavDBScraper'] == 1
         assert constructed['MissAVScraper'] == 1
-        for attr in ('D2PassScraper', 'HEYZOScraper', 'FC2Scraper', 'AVSOXScraper', 'ThePornDBScraper'):
+        for attr in ('D2PassScraper', 'HEYZOScraper', 'TokyoHotScraper', 'FC2Scraper', 'AVSOXScraper', 'ThePornDBScraper'):
             assert constructed[attr] == 0
 
     def test_fc2_number_routes_to_fc2_aggregators_only(self, monkeypatch):
@@ -314,7 +315,7 @@ class TestAutoFanOutQueryRouting:
             'get_enabled_source_ids',
             lambda availability_map=None: [
                 'dmm', 'javbus', 'jav321', 'javdb', 'missav',
-                'd2pass', 'heyzo', 'fc2', 'avsox', 'theporndb',
+                'd2pass', 'heyzo', 'tokyohot', 'fc2', 'avsox', 'theporndb',
             ],
         )
 
@@ -324,7 +325,7 @@ class TestAutoFanOutQueryRouting:
         assert constructed['MissAVScraper'] == 1
         assert constructed['FC2Scraper'] == 1
         assert constructed['AVSOXScraper'] == 1
-        for attr in ('DMMScraper', 'JavBusScraper', 'JAV321Scraper', 'D2PassScraper', 'HEYZOScraper', 'ThePornDBScraper'):
+        for attr in ('DMMScraper', 'JavBusScraper', 'JAV321Scraper', 'D2PassScraper', 'HEYZOScraper', 'TokyoHotScraper', 'ThePornDBScraper'):
             assert constructed[attr] == 0
 
     def test_western_title_routes_to_title_sources_only(self, monkeypatch):
@@ -334,7 +335,7 @@ class TestAutoFanOutQueryRouting:
             'get_enabled_source_ids',
             lambda availability_map=None: [
                 'dmm', 'javbus', 'jav321', 'javdb', 'missav',
-                'd2pass', 'heyzo', 'fc2', 'avsox', 'theporndb',
+                'd2pass', 'heyzo', 'tokyohot', 'fc2', 'avsox', 'theporndb',
             ],
         )
 
@@ -342,7 +343,7 @@ class TestAutoFanOutQueryRouting:
 
         assert constructed['JavDBScraper'] == 1
         assert constructed['ThePornDBScraper'] == 1
-        for attr in ('DMMScraper', 'JavBusScraper', 'JAV321Scraper', 'MissAVScraper', 'D2PassScraper', 'HEYZOScraper', 'FC2Scraper', 'AVSOXScraper'):
+        for attr in ('DMMScraper', 'JavBusScraper', 'JAV321Scraper', 'MissAVScraper', 'D2PassScraper', 'HEYZOScraper', 'TokyoHotScraper', 'FC2Scraper', 'AVSOXScraper'):
             assert constructed[attr] == 0
 
 

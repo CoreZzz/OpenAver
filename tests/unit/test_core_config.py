@@ -386,6 +386,7 @@ class TestMigrationSourceLinks:
         assert sl["dmm"] is True
         assert sl["d2pass"] is True
         assert sl["heyzo"] is True
+        assert sl["tokyohot"] is True
         assert sl["fc2"] is True
         assert sl["javbus"] is False
         assert sl["jav321"] is False
@@ -401,6 +402,7 @@ class TestMigrationSourceLinks:
                 "dmm": True,
                 "d2pass": True,
                 "heyzo": True,
+                "tokyohot": True,
                 "fc2": True,
                 "javbus": False,
                 "jav321": False,
@@ -429,6 +431,7 @@ class TestMigrationSourceLinks:
         assert sl["dmm"] is True          # preserved
         assert sl["d2pass"] is True       # filled from defaults
         assert sl["heyzo"] is True        # filled from defaults
+        assert sl["tokyohot"] is True     # filled from defaults
         assert sl["fc2"] is True          # filled from defaults
         assert sl["javbus"] is False      # filled from defaults
         assert sl["jav321"] is False      # filled from defaults
@@ -697,15 +700,16 @@ class TestMigrationSources:
 
         sources = result["sources"]
         assert isinstance(sources, list)
-        assert len(sources) == 10
+        assert len(sources) == 11
         ids = [s["id"] for s in sources]
         assert ids == [
             "dmm", "javbus", "jav321", "javdb", "missav",
-            "d2pass", "heyzo", "fc2", "avsox", "theporndb",
+            "d2pass", "heyzo", "tokyohot", "fc2", "avsox", "theporndb",
         ]
         emap = self._enabled_map(sources)
         assert emap["theporndb"] is False
-        assert all(enabled is True for sid, enabled in emap.items() if sid != "theporndb")
+        assert emap["tokyohot"] is False
+        assert all(enabled is True for sid, enabled in emap.items() if sid not in {"theporndb", "tokyohot"})
         assert next(s for s in sources if s["id"] == "theporndb")["config"] == {"api_token": ""}
 
     def test_upgrade_preserves_existing_keys(self, tmp_path, monkeypatch):
@@ -729,7 +733,7 @@ class TestMigrationSources:
                 "download_sample_images": False,
             },
             "source_links": {
-                "dmm": True, "d2pass": True, "heyzo": True, "fc2": True,
+                "dmm": True, "d2pass": True, "heyzo": True, "tokyohot": True, "fc2": True,
                 "javbus": False, "jav321": False, "javdb": False, "missav": False, "avsox": False,
             },
             "general": {"theme": "dark", "locale": "ja"},
@@ -740,10 +744,11 @@ class TestMigrationSources:
         result = load_config()
 
         # sources 補齊
-        assert len(result["sources"]) == 10
+        assert len(result["sources"]) == 11
         emap = self._enabled_map(result["sources"])
         assert emap["theporndb"] is False
-        assert all(enabled is True for sid, enabled in emap.items() if sid != "theporndb")
+        assert emap["tokyohot"] is False
+        assert all(enabled is True for sid, enabled in emap.items() if sid not in {"theporndb", "tokyohot"})
         # 既有 key 字面保留
         assert result["general"]["theme"] == "dark"
         assert result["general"]["locale"] == "ja"
@@ -769,11 +774,12 @@ class TestMigrationSources:
 
         result = load_config()
 
-        assert len(result["sources"]) == 10
+        assert len(result["sources"]) == 11
         emap = self._enabled_map(result["sources"])
         assert emap["javbus"] is False
         assert emap["dmm"] is True
         assert emap["missav"] is True
+        assert emap["tokyohot"] is False
         assert emap["theporndb"] is False
         assert result["sources"][-1]["id"] == "theporndb"
 
@@ -798,6 +804,7 @@ class TestMigrationSources:
         # 4 無碼 enabled（d2pass 顯式斷言：是無碼不是有碼）
         assert emap["d2pass"] is True
         assert emap["heyzo"] is True
+        assert emap["tokyohot"] is True
         assert emap["fc2"] is True
         assert emap["avsox"] is True
         assert emap["theporndb"] is False
@@ -817,7 +824,7 @@ class TestMigrationSources:
 
         result = load_config()
 
-        assert len(result["sources"]) == 10
+        assert len(result["sources"]) == 11
         assert result["sources"][0]["enabled"] is True
         emap = self._enabled_map(result["sources"])
         assert emap["missav"] is True
@@ -833,10 +840,11 @@ class TestMigrationSources:
         result = load_config()
 
         assert isinstance(result["sources"], list)
-        assert len(result["sources"]) == 10
+        assert len(result["sources"]) == 11
         emap = self._enabled_map(result["sources"])
         assert emap["theporndb"] is False
-        assert all(enabled is True for sid, enabled in emap.items() if sid != "theporndb")
+        assert emap["tokyohot"] is False
+        assert all(enabled is True for sid, enabled in emap.items() if sid not in {"theporndb", "tokyohot"})
         assert result["sources_bak"] == "broken"
 
     def test_corrupt_sources_missing_id_fallback(self, tmp_path, monkeypatch, caplog):
@@ -851,10 +859,11 @@ class TestMigrationSources:
         with caplog.at_level(logging.WARNING):
             result = load_config()
 
-        assert len(result["sources"]) == 10
+        assert len(result["sources"]) == 11
         emap = self._enabled_map(result["sources"])
         assert emap["theporndb"] is False
-        assert all(enabled is True for sid, enabled in emap.items() if sid != "theporndb")
+        assert emap["tokyohot"] is False
+        assert all(enabled is True for sid, enabled in emap.items() if sid not in {"theporndb", "tokyohot"})
         assert result["sources_bak"] == bad
 
     def test_corrupt_then_valid_keeps_first_bak(self, tmp_path, monkeypatch):
@@ -869,7 +878,7 @@ class TestMigrationSources:
         # config.json 已被 save_config 寫回合法 sources + sources_bak
 
         second = load_config()
-        assert len(second["sources"]) == 10
+        assert len(second["sources"]) == 11
         assert second["sources_bak"] == "broken"  # 不被合法 sources 清掉
 
 

@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 
 from core.scrapers.d2pass import D2PassScraper
 from core.scrapers.heyzo import HEYZOScraper
+from core.scrapers.tokyohot import TokyoHotScraper
 from core.scrapers.dmm import DMMScraper
 from core.scrapers.javbus import JavBusScraper
 from core.scrapers.models import Video
@@ -94,6 +95,50 @@ class TestPipeline:
         assert results[0]['_mode'] == 'uncensored'
         mock_heyzo.assert_called()
 
+    def test_uncensored_detection_tokyohot_single_letter_short_id(self):
+        """N0783 style short ids should route to the TOKYO-HOT path first."""
+        mock_video = _make_video("tokyohot", "N-0783")
+
+        with patch.object(TokyoHotScraper, 'search', return_value=mock_video) as mock_tokyo, \
+             patch.object(D2PassScraper, 'search', return_value=None) as mock_d2:
+            with patch('core.scrapers.dmm.rate_limit'):
+                results = smart_search("n0783")
+
+        assert len(results) == 1
+        assert results[0]['_mode'] == 'uncensored'
+        assert results[0]['_source'] == 'tokyohot'
+        mock_tokyo.assert_called()
+        mock_d2.assert_not_called()
+
+    def test_uncensored_detection_d2pass_single_letter_short_id_fallback(self):
+        """D2Pass remains a fallback if TOKYO-HOT has no matching page."""
+        mock_video = _make_video("d2pass", "N0783")
+
+        with patch.object(TokyoHotScraper, 'search', return_value=None), \
+             patch.object(D2PassScraper, 'search', return_value=mock_video) as mock_d2:
+            with patch('core.scrapers.dmm.rate_limit'):
+                results = smart_search("n0783")
+
+        assert len(results) == 1
+        assert results[0]['_mode'] == 'uncensored'
+        assert results[0]['_source'] == 'd2pass'
+        mock_d2.assert_called()
+
+    def test_uncensored_detection_avsox_alphanumeric_suffix(self):
+        """MKBD-S94 style uncensored ids should route to AVSOX exact search."""
+        from core.scrapers.avsox import AVSOXScraper
+
+        mock_video = _make_video("avsox", "MKD-S150")
+
+        with patch.object(AVSOXScraper, 'search', return_value=mock_video) as mock_avsox:
+            with patch('core.scrapers.dmm.rate_limit'):
+                results = smart_search("MKD-S150-1")
+
+        assert len(results) == 1
+        assert results[0]['_mode'] == 'uncensored'
+        assert results[0]['_source'] == 'avsox'
+        mock_avsox.assert_called()
+
     def test_uncensored_mode_uses_new_sources(self):
         """uncensored_mode=True → D2PassScraper 和 HEYZOScraper 都被嘗試"""
         with patch.object(D2PassScraper, 'search', return_value=None) as mock_d2:
@@ -154,6 +199,137 @@ class TestPipeline:
 
         assert len(results) == 1
         mock_d2.assert_not_called()
+
+    def test_uncensored_mode_fc2_prefers_fc2_before_javdb(self):
+        """FC2 exact queries should use uncensored sources before generic fallback."""
+        fc2_result = {'number': 'FC2-PPV-1234567', 'title': 'FC2 Full', '_source': 'fc2'}
+        javdb_result = {'number': 'FC2-PPV-1234567', 'title': 'JavDB Generic', '_source': 'javdb'}
+        searched = []
+
+        def fake_search_jav(num, source='auto', proxy_url='', javbus_lang=None):
+            searched.append(source)
+            return fc2_result if source == 'fc2' else None
+
+        with patch('core.scraper.search_jav', side_effect=fake_search_jav), \
+             patch('core.scraper._try_javdb_first', return_value=javdb_result) as mock_javdb:
+            results = smart_search("FC2-PPV-1234567", uncensored_mode=True)
+
+        assert len(results) == 1
+        assert results[0]['_source'] == 'fc2'
+        assert searched[0] == 'fc2'
+        mock_javdb.assert_not_called()
+
+    def test_search_jav_auto_fc2_prefers_fc2_over_generic_sources(self, monkeypatch):
+        """Batch enrich calls search_jav(auto), so FC2 must win there too."""
+        from core.scrapers.javdb import JavDBScraper
+        from core.scrapers.fc2 import FC2Scraper
+        from core.scrapers.avsox import AVSOXScraper
+
+        generic_video = _make_video("javdb", "FC2-PPV-1234567").model_copy(update={
+            "title": "JavDB Generic",
+            "cover_url": "https://example.com/generic.jpg",
+        })
+        fc2_video = _make_video("fc2", "FC2-PPV-1234567").model_copy(update={
+            "title": "FC2 Full",
+            "maker": "FC2 Maker",
+            "cover_url": "https://example.com/fc2.jpg",
+        })
+
+        monkeypatch.setattr(
+            "core.scraper.get_enabled_source_ids",
+            lambda availability_map=None: ['javdb', 'fc2'],
+        )
+
+        with patch.object(FC2Scraper, 'search', return_value=fc2_video) as mock_fc2, \
+             patch.object(JavDBScraper, 'search', return_value=generic_video), \
+             patch.object(AVSOXScraper, 'search', return_value=None):
+            result = search_jav("FC2-PPV-1234567", source="auto")
+
+        assert result['_source'] == 'fc2'
+        assert result['title'] == 'FC2 Full'
+        mock_fc2.assert_called()
+
+    def test_search_jav_auto_tokyohot_short_id_prefers_uncensored_source(self, monkeypatch):
+        """Batch enrich should send N0783/N-0783 to TOKYO-HOT before generic sources."""
+        from core.scrapers.javdb import JavDBScraper
+        from core.scrapers.fc2 import FC2Scraper
+        from core.scrapers.avsox import AVSOXScraper
+
+        tokyo_video = _make_video("tokyohot", "N-0783").model_copy(update={
+            "title": "Tokyo-Hot Full",
+            "cover_url": "https://example.com/tokyohot.jpg",
+        })
+        javdb_video = _make_video("javdb", "N-0783").model_copy(update={
+            "title": "JavDB Generic",
+            "cover_url": "https://example.com/generic.jpg",
+        })
+
+        monkeypatch.setattr(
+            "core.scraper.get_enabled_source_ids",
+            lambda availability_map=None: ['javdb', 'tokyohot', 'd2pass'],
+        )
+
+        with patch.object(TokyoHotScraper, 'search', return_value=tokyo_video) as mock_tokyo, \
+             patch.object(D2PassScraper, 'search', return_value=None), \
+             patch.object(HEYZOScraper, 'search', return_value=None), \
+             patch.object(FC2Scraper, 'search', return_value=None), \
+             patch.object(AVSOXScraper, 'search', return_value=None), \
+             patch.object(JavDBScraper, 'search', return_value=javdb_video):
+            result = search_jav("N-0783", source="auto")
+
+        assert result['_source'] == 'tokyohot'
+        assert result['title'] == 'Tokyo-Hot Full'
+        mock_tokyo.assert_called()
+
+    def test_search_jav_auto_mkbd_prefers_avsox_source(self, monkeypatch):
+        """Batch enrich should send MKBD-S94 to AVSOX before generic sources."""
+        from core.scrapers.avsox import AVSOXScraper
+        from core.scrapers.javdb import JavDBScraper
+
+        avsox_video = _make_video("avsox", "MKBD-S94").model_copy(update={
+            "title": "AVSOX Full",
+            "cover_url": "https://example.com/avsox.jpg",
+        })
+        javdb_video = _make_video("javdb", "MKBD-S94").model_copy(update={
+            "title": "JavDB Generic",
+            "cover_url": "https://example.com/generic.jpg",
+        })
+
+        monkeypatch.setattr(
+            "core.scraper.get_enabled_source_ids",
+            lambda availability_map=None: ['javdb', 'avsox'],
+        )
+
+        with patch.object(AVSOXScraper, 'search', return_value=avsox_video) as mock_avsox, \
+             patch.object(JavDBScraper, 'search', return_value=javdb_video):
+            result = search_jav("MKBD-S94", source="auto")
+
+        assert result['_source'] == 'avsox'
+        assert result['title'] == 'AVSOX Full'
+        mock_avsox.assert_called()
+
+    def test_search_jav_auto_mkd_split_part_prefers_avsox_source(self, monkeypatch):
+        """Batch enrich should strip -1/-2/-3 part suffixes for MKD AVSOX ids."""
+        from core.scrapers.avsox import AVSOXScraper
+        from core.scrapers.javdb import JavDBScraper
+
+        avsox_video = _make_video("avsox", "MKD-S150").model_copy(update={
+            "title": "AVSOX Full",
+            "cover_url": "https://example.com/avsox.jpg",
+        })
+
+        monkeypatch.setattr(
+            "core.scraper.get_enabled_source_ids",
+            lambda availability_map=None: ['javdb', 'avsox'],
+        )
+
+        with patch.object(AVSOXScraper, 'search', return_value=avsox_video) as mock_avsox, \
+             patch.object(JavDBScraper, 'search', return_value=None):
+            result = search_jav("MKD-S150-1", source="auto")
+
+        assert result['_source'] == 'avsox'
+        assert result['number'] == 'MKD-S150'
+        mock_avsox.assert_called()
 
     def test_exact_path_always_fan_out(self):
         """精確番號路徑一律走 fan-out，不論 proxy 是否為空。

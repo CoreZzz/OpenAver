@@ -319,7 +319,7 @@ def format_number(number: str) -> str:
 
 # 分群常數（供 scraper.py / settings UI 使用）
 CENSORED_SOURCES = ['dmm', 'javbus', 'jav321', 'javdb', 'missav']
-UNCENSORED_SOURCES = ['d2pass', 'heyzo', 'fc2', 'avsox', 'theporndb']
+UNCENSORED_SOURCES = ['d2pass', 'heyzo', 'tokyohot', 'fc2', 'avsox', 'theporndb']
 PROXY_SOURCES = {'dmm'}  # 需要 proxy 才能使用的來源
 
 # 模糊候選池白名單（CL-1 / CD-plan-65-4 / TASK-65g）：javbus + dmm 兩源。
@@ -337,6 +337,7 @@ SOURCE_NAMES = {
     'missav': 'MissAV',
     'd2pass': 'D2Pass',
     'heyzo': 'HEYZO',
+    'tokyohot': 'Tokyo-Hot',
     'fc2': 'FC2',
     'avsox': 'AVSOX',
     'theporndb': 'ThePornDB',

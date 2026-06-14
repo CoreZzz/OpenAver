@@ -4,6 +4,7 @@ enricher.py - 舊片原地補完（NFO / 封面 / 劇照），絕對不搬移、
 
 import os
 import re
+import subprocess
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -300,10 +301,16 @@ def _merge_meta(base: dict, supplement: dict, number: str = "") -> tuple:
             filled.append(key)
     if (not merged.get("cover_url") or not _is_remote_url(merged.get("cover_url", ""))) and supplement.get("cover_url"):
         merged["cover_url"] = supplement["cover_url"]
+        if "cover_url" not in filled:
+            filled.append("cover_url")
     if merged.get("sample_images") is None and supplement.get("sample_images"):
         merged["sample_images"] = supplement["sample_images"]
     elif not merged.get("sample_images") and supplement.get("sample_images"):
         merged["sample_images"] = supplement["sample_images"]
+    if merged.get("duration") is None and supplement.get("duration") not in (None, ""):
+        merged["duration"] = supplement["duration"]
+        if "duration" not in filled:
+            filled.append("duration")
     # 63c-5：summary/rating 從 supplement（scraper meta）透傳。base 通常是 DB/NFO meta
     # 無此欄（intentionally NOT carried），fill-if-empty 語意：base 有值不覆蓋。
     if not merged.get("summary") and supplement.get("summary"):
@@ -420,6 +427,18 @@ def _sync_nfo_metadata_overrides(nfo_path: Path, meta: dict, fields: list[str]) 
                 elem.text = text
                 modified = True
 
+        def set_text_if_empty(tag: str, value: str) -> None:
+            nonlocal modified
+            text = str(value or "").strip()
+            if not text:
+                return
+            elem = root.find(tag)
+            if elem is None:
+                elem = ET.SubElement(root, tag)
+            if not (elem.text or "").strip():
+                elem.text = text
+                modified = True
+
         def set_series_name(value: str) -> None:
             nonlocal modified
             text = str(value or "").strip()
@@ -479,6 +498,20 @@ def _sync_nfo_metadata_overrides(nfo_path: Path, meta: dict, fields: list[str]) 
                 if len(release_date) >= 4 and release_date[:4].isdigit():
                     set_text("year", release_date[:4])
 
+        if "duration" in fields and meta.get("duration") not in (None, ""):
+            try:
+                duration = int(meta.get("duration"))
+            except (TypeError, ValueError):
+                duration = None
+            if duration is not None:
+                set_text("runtime", str(duration))
+
+        if "url" in fields:
+            set_text("website", meta.get("url", ""))
+
+        if any(field in fields for field in ("cover", "cover_url")):
+            set_text_if_empty("cover", root.findtext("thumb") or "")
+
         if "director" in fields:
             set_text("director", meta.get("director", ""))
 
@@ -508,10 +541,6 @@ def _write_cover(
 ) -> bool:
     if not write_cover:
         return False
-    if not cover_url:
-        return False
-    if not _is_remote_url(cover_url):
-        return False
 
     sidecar_paths = resolve_sidecar_paths(fs_path, _sidecar_meta(number, meta or {}), sidecar_config)
     cover_path = sidecar_paths.cover_path
@@ -519,7 +548,83 @@ def _write_cover(
         return False
     _ensure_parent(cover_path)
 
-    return download_image(cover_url, cover_path)
+    if cover_url and _is_remote_url(cover_url) and download_image(cover_url, cover_path):
+        return True
+
+    return _write_video_frame_cover(fs_path, cover_path)
+
+
+def _imageio_ffmpeg_exe() -> str:
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+    except Exception:
+        logger.debug("imageio-ffmpeg is unavailable; skip local frame cover fallback")
+        return ""
+
+    try:
+        ffmpeg = get_ffmpeg_exe()
+    except Exception:
+        logger.debug("imageio-ffmpeg executable lookup failed")
+        return ""
+    return ffmpeg if ffmpeg and Path(ffmpeg).is_file() else ""
+
+
+def _write_video_frame_cover(fs_path: str, cover_path: str) -> bool:
+    video_path = Path(fs_path)
+    if not video_path.is_file():
+        return False
+
+    ffmpeg = _imageio_ffmpeg_exe()
+    if not ffmpeg:
+        return False
+
+    tmp_path = f"{cover_path}.tmp.jpg"
+    timestamps = ("00:00:30", "00:01:00", "00:00:10", "00:00:01")
+    for timestamp in timestamps:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            completed = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-ss",
+                    timestamp,
+                    "-i",
+                    str(video_path),
+                    "-map",
+                    "0:v:0",
+                    "-frames:v",
+                    "1",
+                    "-q:v",
+                    "3",
+                    tmp_path,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=30,
+                check=False,
+            )
+            if (
+                completed.returncode == 0
+                and os.path.exists(tmp_path)
+                and os.path.getsize(tmp_path) > 1000
+            ):
+                os.replace(tmp_path, cover_path)
+                return True
+        except (OSError, subprocess.SubprocessError):
+            logger.debug("Local frame cover fallback failed at %s for %s", timestamp, fs_path)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    return False
 
 
 def _resolve_extrafanart_dir(

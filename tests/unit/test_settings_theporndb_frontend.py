@@ -41,7 +41,7 @@ def test_theporndb_token_state_saved_into_source_config():
 def test_theporndb_source_mode_is_opt_in_uncensored():
     js = _js()
 
-    assert "UNCENSORED_SOURCES: ['d2pass', 'heyzo', 'fc2', 'avsox', 'theporndb']" in js
+    assert "UNCENSORED_SOURCES: ['d2pass', 'heyzo', 'tokyohot', 'fc2', 'avsox', 'theporndb']" in js
     assert "s.id !== 'theporndb' || this.isThePornDbAvailable()" in js
 
 

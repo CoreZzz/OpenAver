@@ -72,6 +72,7 @@ class SourceLinksConfig(BaseModel):
     dmm: bool = True
     d2pass: bool = True
     heyzo: bool = True
+    tokyohot: bool = True
     fc2: bool = True
     javbus: bool = False
     jav321: bool = False
@@ -423,6 +424,8 @@ def load_config() -> dict:
                     for item in new_sources:
                         if item.get('id') in CENSORED_SOURCES:
                             item['enabled'] = False
+                        if item.get('id') == 'tokyohot':
+                            item['enabled'] = True
                 raw_config['sources'] = new_sources
                 need_save = True
             elif _is_valid_sources(raw_config.get('sources')):

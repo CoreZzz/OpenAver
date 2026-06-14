@@ -119,7 +119,7 @@ class TestSearchSourceValidation:
     def test_uncensored_and_theporndb_sources_not_400(self, client, mocker):
         """d2pass / heyzo（capabilities 原缺、search 一直接受）→ 非 400"""
         mocker.patch('web.routers.search.smart_search', return_value=[])
-        for src in ('d2pass', 'heyzo', 'theporndb'):
+        for src in ('d2pass', 'heyzo', 'tokyohot', 'theporndb'):
             response = client.get('/api/search', params={'q': 'SONE-103', 'source': src})
             assert response.status_code != 400, f"source={src} should not be 400"
 

@@ -16,6 +16,15 @@ BUILTIN_METADATA_OVERRIDES = [
     },
 ]
 
+BUILTIN_TITLE_ACTRESS_RULES = [
+    {
+        "maker": "ザ・流し屋",
+        "title_contains": ["杏ちゃん"],
+        "actresses": ["水希杏"],
+        "number_prefixes": ["FC2-", "FC2PPV"],
+    },
+]
+
 UNKNOWN_ACTRESS_NAMES = {
     "",
     "-",
@@ -124,6 +133,37 @@ def _configured_overrides(config: dict | None) -> list[dict]:
     return [item for item in raw if isinstance(item, dict)]
 
 
+def _apply_title_actress_rules(corrected: dict, number_keys: set[str]) -> list[str]:
+    changed: list[str] = []
+    title = str(corrected.get("title") or corrected.get("original_title") or "").strip()
+    maker = str(corrected.get("maker") or "").strip()
+    if not title:
+        return []
+
+    for rule in BUILTIN_TITLE_ACTRESS_RULES:
+        prefixes = tuple(str(prefix or "").upper() for prefix in rule.get("number_prefixes") or [])
+        if prefixes and not any(key.startswith(prefixes) for key in number_keys):
+            continue
+        rule_maker = str(rule.get("maker") or "").strip()
+        if rule_maker and maker != rule_maker:
+            continue
+        needles = [str(value or "").strip() for value in rule.get("title_contains") or []]
+        if needles and not any(needle and needle in title for needle in needles):
+            continue
+
+        actresses = sanitize_actor_names(rule.get("actresses") or rule.get("actors") or [])
+        if not actresses:
+            continue
+        current = sanitize_actor_names(corrected.get("actresses") or corrected.get("actors") or [])
+        if current and current != ["杏"]:
+            continue
+        for field in ("actors", "actresses"):
+            if corrected.get(field) != actresses:
+                corrected[field] = actresses
+                changed.append(field)
+    return changed
+
+
 def apply_metadata_overrides(
     meta: dict,
     numbers: str | Iterable[str],
@@ -164,6 +204,8 @@ def apply_metadata_overrides(
             if corrected.get(field) != sanitized:
                 corrected[field] = sanitized
                 changed.append(field)
+
+    changed.extend(_apply_title_actress_rules(corrected, number_keys))
 
     overrides = [*BUILTIN_METADATA_OVERRIDES, *_configured_overrides(config)]
     for override in overrides:

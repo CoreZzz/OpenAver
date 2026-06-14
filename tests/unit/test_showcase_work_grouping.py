@@ -43,6 +43,21 @@ def test_showcase_groups_part_files_by_work_key(tmp_path):
     assert {file["part_index"] for file in files} == {"1", "A"}
 
 
+def test_showcase_groups_uncensored_mkd_split_parts_by_work_key(tmp_path):
+    videos = [
+        _video(tmp_path / "MKD-S150-1.mp4", number=None, title="MKD-S150-1"),
+        _video(tmp_path / "MKD-S150-2.mp4", number=None, title="MKD-S150-2"),
+        _video(tmp_path / "MKD-S150-3.mp4", number=None, title="MKD-S150-3"),
+    ]
+
+    grouped = _group_videos_by_work(videos)
+
+    assert len(grouped) == 1
+    _, identity, files = grouped[0]
+    assert identity.work_key == "MKD-S150"
+    assert [file["part_index"] for file in files] == ["1", "2", "3"]
+
+
 def test_actress_video_count_uses_work_card_count(tmp_path):
     videos = [
         _video(tmp_path / "SONE-103-a.mp4"),

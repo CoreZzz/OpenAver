@@ -114,7 +114,7 @@ export function stateConfig() {
 
         // 來源分群常數（與 core/scrapers/utils.py 同步）
         CENSORED_SOURCES: ['dmm', 'javbus', 'jav321', 'javdb', 'missav'],
-        UNCENSORED_SOURCES: ['d2pass', 'heyzo', 'fc2', 'avsox', 'theporndb'],
+        UNCENSORED_SOURCES: ['d2pass', 'heyzo', 'tokyohot', 'fc2', 'avsox', 'theporndb'],
 
         get formatVariables() {
             return [

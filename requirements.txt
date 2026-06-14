@@ -19,6 +19,7 @@ websockets>=12.0
 
 # Utilities
 pillow>=10.0.0
+imageio-ffmpeg>=0.6.0
 
 # Desktop GUI (Windows)
 pywebview>=6.0

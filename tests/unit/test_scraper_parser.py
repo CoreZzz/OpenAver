@@ -390,6 +390,15 @@ class TestSearchQueryIntegration:
         assert is_number_format(query) is True
         assert normalize_number(query) == 'SONE-103'
 
+    def test_mkbd_alphanumeric_suffix_flow(self):
+        query = 'MKBD-S94'
+        assert is_number_format(query) is True
+        assert normalize_number(query) == 'MKBD-S94'
+        assert extract_number('MKBD-S94.mp4') == 'MKBD-S94'
+        assert is_number_format('MKD-S150-1') is True
+        assert normalize_number('MKD-S150-1') == 'MKD-S150'
+        assert extract_number('MKD-S150-1.mp4') == 'MKD-S150'
+
     # --- 檔名提取 + 搜尋流程 ---
     def test_filename_to_search_flow(self):
         """檔名提取到搜尋的完整流程"""

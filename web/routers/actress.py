@@ -360,6 +360,55 @@ def _count_work_cards_for_videos(videos: list) -> int:
     return len(_group_videos_by_work(videos))
 
 
+def _build_local_actress_from_videos(
+    name: str,
+    alias_repo: AliasRepository,
+) -> Optional[Actress]:
+    """
+    Build a minimal favorite from local library data when cloud profile lookup
+    cannot find the actress. This keeps typo-only names out unless a local video
+    already lists the actress exactly or through an alias group.
+    """
+    primary_name = name
+    aliases: list[str] = []
+
+    try:
+        record = alias_repo.get_by_primary(name)
+        if record is None:
+            record = alias_repo.find_by_alias(name)
+
+        if record is not None:
+            primary_name = record.primary_name
+            aliases = [
+                alias for alias in (record.aliases or [])
+                if alias and alias != primary_name
+            ]
+            if name != primary_name and name not in aliases:
+                aliases.append(name)
+            query_names = _merge_unique_strings([primary_name], aliases)
+        else:
+            query_names = list(alias_repo.resolve(name))
+    except Exception as e:
+        logger.warning("[actress] local favorite alias lookup failed for %r: %s", name, e)
+        query_names = [name]
+
+    try:
+        videos = VideoRepository().get_videos_by_actress_names(query_names)
+    except Exception as e:
+        logger.warning("[actress] local favorite video lookup failed for %r: %s", name, e)
+        return None
+
+    if not videos:
+        return None
+
+    return Actress(
+        name=primary_name,
+        aliases=[alias for alias in aliases if alias != primary_name],
+        photo_source="local_crop" if any(video.cover_path for video in videos) else None,
+        primary_text_source="local",
+    )
+
+
 # ---------------------------------------------------------------------------
 # 端點一：POST /api/actresses/favorite — 收藏女優
 # ---------------------------------------------------------------------------
@@ -399,6 +448,17 @@ def add_favorite(req: FavoriteRequest):
             }
         )
 
+    existing_by_alias = _find_existing_favorite_by_names([name], repo, alias_repo)
+    if existing_by_alias is not None:
+        video_count = _count_actress_work_cards(existing_by_alias.name, alias_repo)
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "already_exists",
+                "actress": _actress_to_response(existing_by_alias, video_count, alias_repo),
+            }
+        )
+
     # 2. 番號前綴 → 片商名轉換（前端傳 SSIS，gfriends 需要 S1）
     resolved_makers = None
     if req.makers:
@@ -419,16 +479,47 @@ def add_favorite(req: FavoriteRequest):
     if profile is None:
         result = get_actress_profile(name, makers=resolved_makers)
         if result.data is None:
+            local_actress = _build_local_actress_from_videos(name, alias_repo)
+            if local_actress is not None:
+                existing = _find_existing_favorite_by_names(
+                    [name, local_actress.name, *(local_actress.aliases or [])],
+                    repo,
+                    alias_repo,
+                )
+                if existing is not None:
+                    video_count = _count_actress_work_cards(existing.name, alias_repo)
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "error": "already_exists",
+                            "actress": _actress_to_response(existing, video_count, alias_repo),
+                        },
+                    )
+
+                repo.save(local_actress)
+                actress = repo.get_by_name(local_actress.name) or local_actress
+                logger.info("[actress] local favorite created: %s", actress.name)
+                skipped_aliases = _sync_favorite_aliases(alias_repo, actress)
+                video_count = _count_actress_work_cards(actress.name, alias_repo)
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "success": True,
+                        "actress": _actress_to_response(actress, video_count, alias_repo),
+                        "photo_downloaded": False,
+                        "skipped_aliases": skipped_aliases,
+                    },
+                )
+
             if result.timed_out:
                 return JSONResponse(
                     status_code=504,
                     content={"error": "timeout", "message": "Scraper 超時"}
                 )
-            else:
-                return JSONResponse(
-                    status_code=404,
-                    content={"error": "not_found", "message": "查無此女優"}
-                )
+            return JSONResponse(
+                status_code=404,
+                content={"error": "not_found", "message": "查無此女優"}
+            )
         profile = result.data
 
     # 4. 組裝 Actress dataclass
@@ -872,9 +963,11 @@ async def set_actress_photo(name: str, req: SetActressPhotoRequest):
     """
     init_db()
     repo = ActressRepository()
-    actress = repo.get_by_name(name)
+    alias_repo = AliasRepository()
+    actress = _find_existing_favorite_by_names([name], repo, alias_repo)
     if actress is None:
         return JSONResponse(status_code=404, content={"error": "not_found"})
+    actress_name = actress.name
 
     if req.source not in CLOUD_SOURCES and req.source != "local_crop":
         return JSONResponse(status_code=400, content={"error": "unknown_source"})
@@ -882,7 +975,7 @@ async def set_actress_photo(name: str, req: SetActressPhotoRequest):
     if req.source in CLOUD_SOURCES:
         if not req.url:
             return JSONResponse(status_code=400, content={"error": "url_required"})
-        ok = await asyncio.to_thread(download_actress_photo, name, req.url, req.source)
+        ok = await asyncio.to_thread(download_actress_photo, actress_name, req.url, req.source)
         if not ok:
             return JSONResponse(status_code=500, content={"error": "download_failed"})
 
@@ -901,7 +994,12 @@ async def set_actress_photo(name: str, req: SetActressPhotoRequest):
             logger.warning("[actress] local_crop coerce request path 失敗 path=%s: %s", video_fs_path, e)
         # 從 DB 取該影片的 cover_path
         video_repo = VideoRepository()
-        videos = video_repo.get_videos_by_actress(name)
+        try:
+            actress_names = list(alias_repo.resolve(actress_name))
+        except Exception as e:
+            logger.warning("[actress] local_crop alias resolve 失敗 name=%s: %s", actress_name, e)
+            actress_names = [actress_name]
+        videos = video_repo.get_videos_by_actress_names(actress_names)
         # Fix 3 (T3): v.path 在 DB 存 file:/// URI（gallery_scanner 用 to_file_uri 寫入），
         # 比對前雙邊都正規化為 FS path，避免 URI vs FS path 永遠 fail
         match = next(
@@ -925,7 +1023,7 @@ async def set_actress_photo(name: str, req: SetActressPhotoRequest):
         if crop_bytes is None:
             return JSONResponse(status_code=500, content={"error": "crop_failed"})
         # glob 刪舊副檔名 + 寫入
-        safe = sanitize_filename(name)
+        safe = sanitize_filename(actress_name)
         GFRIENDS_DIR.mkdir(parents=True, exist_ok=True)
         for old in GFRIENDS_DIR.glob(f"{safe}.*"):
             old.unlink()
@@ -936,7 +1034,7 @@ async def set_actress_photo(name: str, req: SetActressPhotoRequest):
     repo.save(actress)
 
     t = int(time.time())
-    photo_url = f"/api/actresses/photo/{quote(name)}?t={t}"
+    photo_url = f"/api/actresses/photo/{quote(actress_name)}?t={t}"
     return JSONResponse(status_code=200, content={
         "photo_url": photo_url,
         "photo_source": req.source,

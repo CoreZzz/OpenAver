@@ -26,7 +26,8 @@ logger = get_logger(__name__)
 REQUEST_TIMEOUT = 30
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+    # Covers are saved to legacy image filenames, so prefer JPEG/PNG over WebP.
+    'Accept': 'image/jpeg,image/png,*/*;q=0.5',
     'Accept-Language': 'ja-JP,ja;q=0.9,zh-TW;q=0.8,zh;q=0.7,en;q=0.6',
 }
 

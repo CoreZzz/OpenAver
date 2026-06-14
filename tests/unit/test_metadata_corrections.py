@@ -14,6 +14,22 @@ def test_builtin_override_corrects_fc2_ppv_1313698_actress():
     assert "actors" in fields
 
 
+def test_title_rule_maps_zanagashiya_an_chan_to_mizuki_an():
+    corrected, fields = apply_metadata_overrides(
+        {
+            "number": "FC2-9999999",
+            "title": "清楚美人杏ちゃん サンプルタイトル",
+            "maker": "ザ・流し屋",
+            "actors": [],
+        },
+        "FC2-PPV-9999999",
+    )
+
+    assert corrected["actors"] == ["水希杏"]
+    assert corrected["actresses"] == ["水希杏"]
+    assert {"actors", "actresses"}.issubset(fields)
+
+
 def test_unknown_actor_placeholders_are_removed():
     assert sanitize_actor_names(["ないない", "不明", "unknown", "ログイン", "菅野松雪"]) == ["菅野松雪"]
 

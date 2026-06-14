@@ -52,6 +52,11 @@ class TestCanonicalNumber:
         assert identity.canonical_number == "N-0808"
         assert identity.number_aliases == ["N-0808", "N0808"]
 
+    def test_single_letter_k_number(self):
+        identity = parse_media_identity("k1234.mp4")
+        assert identity.canonical_number == "K-1234"
+        assert identity.number_aliases == ["K-1234", "K1234"]
+
     def test_compact_red_is_distinct_from_hyphenated_red(self):
         compact = parse_media_identity("RED155.avi")
         hyphenated = parse_media_identity("RED-155.avi")
@@ -72,6 +77,19 @@ class TestCanonicalNumber:
     def test_unconfigured_short_number_prefix_is_not_padded(self):
         identity = parse_media_identity("JS-19.mp4")
         assert identity.canonical_number == "JS-19"
+
+    def test_mkbd_alphanumeric_suffix_number(self):
+        hyphenated = parse_media_identity("MKBD-S94.mp4")
+        compact = parse_media_identity("MKBDS94.mp4")
+        split = parse_media_identity("MKD-S150-1.mp4")
+
+        assert hyphenated.canonical_number == "MKBD-S94"
+        assert hyphenated.number_aliases == ["MKBD-S94", "MKBDS94"]
+        assert compact.canonical_number == "MKBD-S94"
+        assert compact.number_aliases == ["MKBD-S94", "MKBDS94"]
+        assert split.canonical_number == "MKD-S150"
+        assert split.number_aliases == ["MKD-S150", "MKDS150"]
+        assert split.part_index == "1"
 
     def test_western_title_keeps_title_stem_without_fake_number(self):
         identity = parse_media_identity(
@@ -146,9 +164,23 @@ class TestSourceQueries:
         assert build_source_queries(identity, "javbus") == ["ZMIN-005"]
         assert build_source_queries(identity, "jav321") == ["ZMIN-005"]
 
+    def test_mkbd_source_query_keeps_alphanumeric_suffix_alias(self):
+        identity = parse_media_identity("MKBD-S94.mp4")
+        assert build_source_queries(identity, "avsox") == ["MKBD-S94", "MKBDS94"]
+
+        mkd = parse_media_identity("MKD-S150-1.mp4")
+        assert build_source_queries(mkd, "avsox") == ["MKD-S150", "MKDS150"]
+
     def test_date_style_keeps_canonical_and_d2pass_uses_exact_separator(self):
         identity = parse_media_identity("102318_778.mp4")
         assert identity.canonical_number == "102318_778"
         assert identity.work_key == "102318_778"
         assert build_source_queries(identity, "d2pass") == ["102318_778"]
         assert build_source_queries(identity, "javdb") == ["102318_778", "102318-778"]
+
+    def test_single_letter_d2pass_query_uses_compact_site_id_first(self):
+        identity = parse_media_identity("n0783.mp4")
+        assert identity.canonical_number == "N-0783"
+        assert build_source_queries(identity, "d2pass") == ["n0783", "N0783", "N-0783"]
+        assert build_source_queries(identity, "tokyohot") == ["n0783", "N0783", "N-0783"]
+        assert build_source_queries(identity, "metatube:TOKYO-HOT") == ["n0783", "N0783", "N-0783"]

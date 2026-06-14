@@ -122,7 +122,7 @@ def test_uncensored_source_mode_uses_broad_search_pool(client, temp_config_path)
     data = client.get("/api/scraper-sources").json()
     ids = [s["id"] for s in data["sources"]]
     assert data["source_mode"] == "uncensored"
-    assert ids == ["dmm", "javbus", "jav321", "javdb", "missav", "d2pass", "heyzo", "fc2", "avsox", "theporndb"]
+    assert ids == ["dmm", "javbus", "jav321", "javdb", "missav", "d2pass", "heyzo", "tokyohot", "fc2", "avsox"]
 
 
 def test_beta_source_not_in_response(client, temp_config_path):

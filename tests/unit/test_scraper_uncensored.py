@@ -82,6 +82,23 @@ def test_date_type_multiple_date_providers_order(monkeypatch):
     assert result == ["metatube:1Pondo", "metatube:10musume", "d2pass", "heyzo", "fc2", "avsox"]
 
 
+def test_tokyo_hot_short_id_metatube_prepended(monkeypatch):
+    _patch_enabled(monkeypatch, ["metatube:TOKYO-HOT", "metatube:Caribbeancom"])
+    result = scraper._get_uncensored_sources("N-0783")
+    assert result == ["metatube:TOKYO-HOT", "tokyohot", "d2pass"]
+
+
+def test_tokyo_hot_short_id_without_metatube_keeps_d2pass_fallback(monkeypatch):
+    _patch_enabled(monkeypatch, [])
+    assert scraper._get_uncensored_sources("n0783") == ["tokyohot", "d2pass"]
+
+
+def test_avsox_alphanumeric_suffix_uses_avsox_only(monkeypatch):
+    _patch_enabled(monkeypatch, ["metatube:Caribbeancom"])
+    assert scraper._get_uncensored_sources("MKBD-S94") == ["avsox"]
+    assert scraper._get_uncensored_sources("MKD-S150-1") == ["avsox"]
+
+
 # ─── 常數正確性 ───
 
 def test_date_uncensored_constant_excludes_branch_providers():
