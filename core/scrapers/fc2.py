@@ -4,6 +4,7 @@ import math
 import re
 import requests
 from typing import Optional
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from core.logger import get_logger
 
@@ -182,6 +183,22 @@ class FC2Scraper(BaseScraper):
         url = str(url or "").strip()
         return f"https:{url}" if url.startswith("//") else url
 
+    def _absolute_detail_url(self, url: str) -> str:
+        return urljoin(f"{self.BASE_URL}/", self._absolute_url(url))
+
+    def _is_detail_url_for_number(self, url: str, fc2_number: str) -> bool:
+        text = str(url or "")
+        return (
+            bool(re.search(rf"(?<!\d)id{re.escape(fc2_number)}(?!\d)", text))
+            and "/search" not in text
+        )
+
+    def _prefer_japanese_detail_url(self, url: str) -> str:
+        parts = urlsplit(url)
+        if parts.path.startswith(("/en/video/", "/tw/video/", "/ko/video/")):
+            return urlunsplit(parts._replace(path=parts.path[3:]))
+        return url
+
     def _downloadable_image_url(self, url: str) -> str:
         """Convert FC2 raw storage images into the public thumbnail endpoint."""
         url = self._absolute_url(url)
@@ -272,17 +289,24 @@ class FC2Scraper(BaseScraper):
             if resp.status_code != 200:
                 return None
 
+            final_url = self._absolute_detail_url(getattr(resp, "url", ""))
+            if self._is_detail_url_for_number(final_url, fc2_number):
+                return self._prefer_japanese_detail_url(final_url)
+
             html = etree.fromstring(resp.content, etree.HTMLParser())
 
             # 找符合番號的連結（在 <a> 標籤中）
-            urls = html.xpath(f"//a[contains(@href, 'id{fc2_number}')]/@href")
+            urls = [
+                self._prefer_japanese_detail_url(self._absolute_detail_url(url))
+                for url in html.xpath(f"//a[contains(@href, 'id{fc2_number}')]/@href")
+            ]
 
             if not urls:
                 return None
 
             # 優先選擇日文版（排除 /tw/, /ko/, /en/）
             non_jp_langs = ["/tw/", "/ko/", "/en/"]
-            for url in urls:
+            for url in self._dedupe_urls(urls):
                 if all(lang not in url for lang in non_jp_langs):
                     return url
 

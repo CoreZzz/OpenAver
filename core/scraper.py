@@ -433,6 +433,7 @@ _WESTERN_SITE_HINTS = {
     "vixen",
     "wicked",
 }
+_EXACT_UNCENSORED_KINDS = {"fc2", "heyzo", "date_uncensored", "tokyo_hot", "avsox_uncensored"}
 
 
 def _query_kind(identity) -> str:
@@ -717,7 +718,7 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '',
         query_kind = _query_kind(identity)
         enabled_sids = get_enabled_source_ids(availability_map=metatube_state.availability_map())
         enabled_sids = _filter_auto_sources_for_query(enabled_sids, identity)
-        if query_kind in {"fc2", "heyzo", "date_uncensored", "tokyo_hot", "avsox_uncensored"}:
+        if query_kind in _EXACT_UNCENSORED_KINDS:
             uncensored_sids = [
                 sid for sid in _get_uncensored_sources(number)
                 if _source_allowed_for_query_kind(sid, query_kind)
@@ -729,7 +730,7 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '',
         results_by_source: Dict[str, Video] = {}
         metatube_shims = []  # list of (sid, shim) for parallel dispatch
 
-        def run_builtin_source(sid: str) -> Optional[Video]:
+        def run_source(sid: str) -> Optional[Video]:
             factory = source_to_scraper.get(sid)
             if not factory:
                 return None
@@ -751,20 +752,30 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '',
                     continue
             return found
 
-        priority_sids = () if query_kind in {"fc2", "heyzo", "date_uncensored", "tokyo_hot", "avsox_uncensored"} else ('javdb', 'missav')
+        standard_fanout_sids = []
+        if query_kind in _EXACT_UNCENSORED_KINDS:
+            for sid in enabled_sids:
+                if run_source(sid):
+                    enabled_sids = [sid]
+                    break
+
+        priority_sids = () if query_kind in _EXACT_UNCENSORED_KINDS else ('javdb', 'missav')
         for priority_sid in priority_sids:
             if priority_sid not in enabled_sids:
                 continue
-            priority_result = run_builtin_source(priority_sid)
+            priority_result = run_source(priority_sid)
             if priority_result:
                 enabled_sids = [priority_sid]
                 break
             enabled_sids = [sid for sid in enabled_sids if sid != priority_sid]
 
+        if query_kind not in _EXACT_UNCENSORED_KINDS:
+            standard_fanout_sids = enabled_sids
+
         if results_by_source:
             enabled_sids = [sid for sid in enabled_sids if sid in results_by_source]
 
-        for sid in ([] if results_by_source else enabled_sids):
+        for sid in ([] if results_by_source else standard_fanout_sids):
             factory = source_to_scraper.get(sid)
             if not factory:
                 continue

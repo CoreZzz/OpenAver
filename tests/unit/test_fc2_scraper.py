@@ -127,11 +127,12 @@ RELATED_STORAGE_ONLY_HTML = """\
 # Helpers
 # ============================================================
 
-def make_response(html: str, status_code: int = 200) -> MagicMock:
+def make_response(html: str, status_code: int = 200, url: str = "https://javten.com/search?kw=1723984") -> MagicMock:
     resp = MagicMock()
     resp.status_code = status_code
     resp.text = html
     resp.content = html.encode("utf-8")
+    resp.url = url
     return resp
 
 
@@ -215,6 +216,31 @@ class TestFullFields:
         assert video.date == "2021-10-31"
         assert video.duration == 83
         assert [a.name for a in video.actresses] == ["水希杏", "別名テスト"]
+
+
+class TestSearchUrl:
+    """javten search entrypoint variants."""
+
+    def test_search_url_uses_redirected_detail_url(self, scraper):
+        resp = make_response(
+            "<html><body>detail page without result anchors</body></html>",
+            url="https://javten.com/en/video/728141/id1723984/sheer-gym-clothes",
+        )
+        scraper._session.get = MagicMock(return_value=resp)
+
+        assert scraper._search_url("1723984") == (
+            "https://javten.com/video/728141/id1723984/sheer-gym-clothes"
+        )
+
+    def test_search_url_absolutizes_relative_result_link(self, scraper):
+        resp = make_response(
+            '<html><body><a href="/video/728141/id1723984/sheer-gym-clothes">hit</a></body></html>'
+        )
+        scraper._session.get = MagicMock(return_value=resp)
+
+        assert scraper._search_url("1723984") == (
+            "https://javten.com/video/728141/id1723984/sheer-gym-clothes"
+        )
 
 
 class TestNoGallery:

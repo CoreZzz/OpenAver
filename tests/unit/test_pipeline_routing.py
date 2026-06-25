@@ -241,13 +241,15 @@ class TestPipeline:
         )
 
         with patch.object(FC2Scraper, 'search', return_value=fc2_video) as mock_fc2, \
-             patch.object(JavDBScraper, 'search', return_value=generic_video), \
-             patch.object(AVSOXScraper, 'search', return_value=None):
+             patch.object(JavDBScraper, 'search', return_value=generic_video) as mock_javdb, \
+             patch.object(AVSOXScraper, 'search', return_value=None) as mock_avsox:
             result = search_jav("FC2-PPV-1234567", source="auto")
 
         assert result['_source'] == 'fc2'
         assert result['title'] == 'FC2 Full'
         mock_fc2.assert_called()
+        mock_avsox.assert_not_called()
+        mock_javdb.assert_not_called()
 
     def test_search_jav_auto_tokyohot_short_id_prefers_uncensored_source(self, monkeypatch):
         """Batch enrich should send N0783/N-0783 to TOKYO-HOT before generic sources."""
