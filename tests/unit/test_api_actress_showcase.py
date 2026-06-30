@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from core.database import init_db, Actress, ActressRepository, Video, VideoRepository
+from core.path_utils import to_file_uri
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +29,10 @@ def client_with_db(monkeypatch, db_with_actresses):
     """TestClient with monkeypatched DB path，actress router 用"""
     monkeypatch.setattr("core.database.get_db_path", lambda: db_with_actresses)
     monkeypatch.setattr("web.routers.actress.init_db", lambda: None)
+    monkeypatch.setattr(
+        "web.routers.actress.load_config",
+        lambda: {"gallery": {"directories": [], "directory_labels": {}, "path_mappings": {}}},
+    )
     # patch get_local_photo_path to return None (no photo files in test)
     monkeypatch.setattr("web.routers.actress.get_local_photo_path", lambda name: None)
     from web.app import app
@@ -106,6 +111,107 @@ class TestActressListEndpoint:
 
         assert actresses_map["miru"]["video_count"] == 1
         assert actresses_map["miruku"]["video_count"] == 1
+
+    def test_list_video_count_uses_uncensored_gallery_scope(
+        self,
+        client_with_db,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Configured censored directories should not contribute to favorite work count."""
+        client, db_path = client_with_db
+        uncensored_dir = tmp_path / "uncensored"
+        censored_dir = tmp_path / "censored"
+        uncensored_dir.mkdir()
+        censored_dir.mkdir()
+        monkeypatch.setattr(
+            "web.routers.actress.load_config",
+            lambda: {
+                "gallery": {
+                    "directories": [str(uncensored_dir), str(censored_dir)],
+                    "directory_labels": {
+                        str(uncensored_dir): "uncensored",
+                        str(censored_dir): "censored",
+                    },
+                    "path_mappings": {},
+                }
+            },
+        )
+
+        repo = ActressRepository(db_path)
+        repo.save(Actress(name="alice"))
+
+        video_repo = VideoRepository(db_path)
+        video_repo.upsert_batch([
+            Video(
+                path=to_file_uri(str(uncensored_dir / "FC2-PPV-001.mp4")),
+                number="FC2-PPV-001",
+                title="Uncensored",
+                actresses=["alice"],
+                mtime=100.0,
+            ),
+            Video(
+                path=to_file_uri(str(censored_dir / "SSIS-001.mp4")),
+                number="SSIS-001",
+                title="Censored",
+                actresses=["alice"],
+                mtime=200.0,
+            ),
+        ])
+
+        response = client.get("/api/actresses")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["actresses"][0]["name"] == "alice"
+        assert data["actresses"][0]["video_count"] == 1
+
+    def test_list_video_count_falls_back_for_censored_only_favorite(
+        self,
+        client_with_db,
+        tmp_path,
+        monkeypatch,
+    ):
+        """A manually kept censored-only favorite should keep its local work count."""
+        client, db_path = client_with_db
+        uncensored_dir = tmp_path / "uncensored"
+        censored_dir = tmp_path / "censored"
+        uncensored_dir.mkdir()
+        censored_dir.mkdir()
+        monkeypatch.setattr(
+            "web.routers.actress.load_config",
+            lambda: {
+                "gallery": {
+                    "directories": [str(uncensored_dir), str(censored_dir)],
+                    "directory_labels": {
+                        str(uncensored_dir): "uncensored",
+                        str(censored_dir): "censored",
+                    },
+                    "path_mappings": {},
+                }
+            },
+        )
+
+        repo = ActressRepository(db_path)
+        repo.save(Actress(name="RION"))
+
+        video_repo = VideoRepository(db_path)
+        video_repo.upsert_batch([
+            Video(
+                path=to_file_uri(str(censored_dir / "SNIS-517.mp4")),
+                number="SNIS-517",
+                title="新人NO.1STYLE AVデビュー RION",
+                actresses=["RION"],
+                mtime=100.0,
+            ),
+        ])
+
+        response = client.get("/api/actresses")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["actresses"][0]["name"] == "RION"
+        assert data["actresses"][0]["video_count"] == 1
 
     def test_list_video_count_dirty_data(self, client_with_db):
         """actresses 欄位為無效 JSON 時，video_count 回傳 0（不炸）"""

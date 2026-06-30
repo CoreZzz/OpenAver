@@ -488,7 +488,7 @@ def is_path_under_dir(path: str, dir_uri: str) -> bool:
     prefix = dir_uri if dir_uri.endswith('/') else dir_uri + '/'
     return path.startswith(prefix)
 
-def coerce_to_file_uri(value: str) -> str:
+def coerce_to_file_uri(value: str, path_mappings: dict = None) -> str:
     """Idempotent file URI 轉換：value 可能是 FS path 或已是 file:/// URI。
 
     已是 file:/// 開頭→ 原樣回傳，否則 to_file_uri()。
@@ -498,4 +498,4 @@ def coerce_to_file_uri(value: str) -> str:
         return value
     if value.startswith("file:///"):
         return value
-    return to_file_uri(value)
+    return to_file_uri(value, path_mappings)

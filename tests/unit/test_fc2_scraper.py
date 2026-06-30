@@ -122,6 +122,35 @@ RELATED_STORAGE_ONLY_HTML = """\
 </body></html>
 """
 
+OFFICIAL_PRODUCT_HTML = """\
+<html><head>
+<meta charset="utf-8">
+<meta property="og:title" content="FC2-PPV-4862649 Official Fallback Title">
+<meta property="og:image" content="https://storage201000.contents.fc2.com/file/373/37213813/1773395661.66.png">
+<meta property="og:description" content="Official fallback description">
+</head><body>
+<script type="application/ld+json">
+{
+  "@context": "http://schema.org/",
+  "@type": "Product",
+  "sku": "4862649",
+  "name": "Official Fallback Title",
+  "description": "Official JSON-LD description",
+  "image": {
+    "@type": "ImageObject",
+    "url": "https://storage201000.contents.fc2.com/file/373/37213813/1773395661.66.png"
+  },
+  "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": 5
+  }
+}
+</script>
+<span>2026/03/13</span>
+<img src="//contents-thumbnail2.fc2.com/w480/storage201000.contents.fc2.com/file/373/37213813/1773286806.1.png">
+</body></html>
+"""
+
 
 # ============================================================
 # Helpers
@@ -241,6 +270,31 @@ class TestSearchUrl:
         assert scraper._search_url("1723984") == (
             "https://javten.com/video/728141/id1723984/sheer-gym-clothes"
         )
+
+
+class TestOfficialFallback:
+    def test_search_uses_official_fc2_page_when_javten_misses(self, scraper):
+        official_resp = make_response(
+            OFFICIAL_PRODUCT_HTML,
+            url="https://adult.contents.fc2.com/article/4862649/",
+        )
+        scraper._session.get = MagicMock(return_value=official_resp)
+
+        with patch.object(scraper, "_search_url", return_value=None):
+            video = scraper.search("FC2-PPV-4862649")
+
+        assert video is not None
+        assert video.number == "FC2-PPV-4862649"
+        assert video.title == "Official Fallback Title"
+        assert video.date == "2026-03-13"
+        assert video.maker == "FC2"
+        assert video.rating == 5
+        assert video.cover_url == (
+            "https://contents-thumbnail2.fc2.com/w1000/"
+            "storage201000.contents.fc2.com/file/373/37213813/1773395661.66.png"
+        )
+        assert video.sample_images[0] == video.cover_url
+        assert video.detail_url == "https://adult.contents.fc2.com/article/4862649/"
 
 
 class TestNoGallery:

@@ -78,6 +78,44 @@ class HEYZOScraper(BaseScraper):
             logger.debug(f"HEYZO JSON-LD parse error: {e}")
         return None
 
+    def _extract_html_fallback(self, html_content: bytes, heyzo_num: str) -> Optional[dict]:
+        """Extract Japanese HEYZO metadata when JSON-LD is absent."""
+        try:
+            html = etree.fromstring(html_content, etree.HTMLParser())
+            raw_title = "".join(html.xpath("//title/text()")).strip()
+            title = raw_title
+            if "】" in title:
+                title = title.split("】", 1)[1].strip()
+            if " - " in title:
+                title = title.split(" - ", 1)[0].strip()
+
+            actress = "".join(
+                html.xpath(
+                    '//table[contains(@class,"movieInfo")]//tr/td[contains(text(),"出演")]/following-sibling::td[1]//text()'
+                )
+            ).strip()
+            date = "".join(
+                html.xpath(
+                    '//table[contains(@class,"movieInfo")]//tr/td[contains(text(),"公開日")]/following-sibling::td[1]//text()'
+                )
+            ).strip()
+
+            if not title:
+                return None
+
+            data = {
+                "@type": "Movie",
+                "name": title,
+                "dateCreated": f"{date}T00:00:00+09:00" if date else "",
+                "image": f"//www.heyzo.com/contents/3000/{heyzo_num}/images/player_thumbnail.jpg",
+            }
+            if actress:
+                data["actor"] = {"@type": "Person", "name": actress}
+            return data
+        except Exception as e:
+            logger.debug(f"HEYZO HTML fallback parse error: {e}")
+            return None
+
     def _extract_table_data(self, html_content: bytes) -> dict:
         """
         從 HTML table.movieInfo 提取補充資料。
@@ -91,7 +129,7 @@ class HEYZOScraper(BaseScraper):
 
             # Series
             series = html.xpath(
-                '//table[@class="movieInfo"]//tr/td[contains(text(),"Series")]/following-sibling::td[1]/text()'
+                '//table[contains(@class,"movieInfo")]//tr/td[contains(text(),"Series") or contains(text(),"シリーズ")]/following-sibling::td[1]/text()'
             )
             series_text = series[0].strip() if series else ''
             # Filter out placeholder values like "-----" or "---"
@@ -101,7 +139,7 @@ class HEYZOScraper(BaseScraper):
 
             # Tags（Type 欄位）
             tags = html.xpath(
-                '//table[@class="movieInfo"]//tr/td[contains(text(),"Type")]/following-sibling::td[1]//a/text()'
+                '//table[contains(@class,"movieInfo")]//tr/td[contains(text(),"Type") or contains(text(),"女優タイプ") or contains(text(),"タグキーワード")]/following-sibling::td[1]//a/text()'
             )
             result['tags'] = [t.strip() for t in tags if t.strip()]
 
@@ -131,6 +169,23 @@ class HEYZOScraper(BaseScraper):
             logger.debug(f"HEYZO table parse error: {e}")
         return result
 
+    def _duration_from_json_ld(self, json_ld: dict) -> Optional[int]:
+        """Extract duration minutes from JSON-LD ISO-8601 duration fields."""
+        candidates = [json_ld.get("duration", "")]
+        video_data = json_ld.get("video", {})
+        if isinstance(video_data, dict):
+            candidates.append(video_data.get("duration", ""))
+
+        for value in candidates:
+            text = str(value or "").strip()
+            match = re.fullmatch(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", text)
+            if not match:
+                continue
+            hours = int(match.group(1) or 0)
+            minutes = int(match.group(2) or 0)
+            return hours * 60 + minutes
+        return None
+
     def search(self, number: str) -> Optional[Video]:
         """
         搜尋影片資訊。
@@ -150,16 +205,30 @@ class HEYZOScraper(BaseScraper):
         ja_url = self.BASE_URL.format(num=heyzo_num)
 
         try:
-            # Step 1: 取英文頁 → JSON-LD（羅馬字女優名、英文 title）
-            resp = self._session.get(en_url, timeout=self.config.timeout)
-            if resp.status_code == 404:
-                return None
-            if resp.status_code != 200:
-                logger.debug(f"HEYZO EN page: HTTP {resp.status_code} for {heyzo_num}")
-                return None
+            # Step 1: prefer Japanese page; fall back to English if unavailable.
+            resp = None
+            json_ld = None
+            for page_url, label in ((ja_url, "JA"), (en_url, "EN")):
+                page_resp = self._session.get(page_url, timeout=self.config.timeout)
+                if page_resp.status_code == 404:
+                    continue
+                if page_resp.status_code != 200:
+                    logger.debug(f"HEYZO {label} page: HTTP {page_resp.status_code} for {heyzo_num}")
+                    continue
+                page_json_ld = self._extract_json_ld(page_resp.content)
+                if not page_json_ld:
+                    page_json_ld = self._extract_html_fallback(page_resp.content, heyzo_num)
+                    if not page_json_ld:
+                        logger.debug(f"HEYZO {label} page: JSON-LD missing for {heyzo_num}")
+                        continue
+                if not page_json_ld.get('name', ''):
+                    logger.debug(f"HEYZO {label} page: title missing for {heyzo_num}")
+                    continue
+                resp = page_resp
+                json_ld = page_json_ld
+                break
 
-            json_ld = self._extract_json_ld(resp.content)
-            if not json_ld:
+            if resp is None or json_ld is None:
                 return None
 
             # Step 2: 解析 JSON-LD
@@ -192,9 +261,10 @@ class HEYZOScraper(BaseScraper):
             rating = float(agg_rating['ratingValue']) if agg_rating.get('ratingValue') else None
             votes = int(agg_rating['reviewCount']) if agg_rating.get('reviewCount') else None
 
-            # Step 3: 從同一 EN page 的 HTML table 取 tags、series
-            # （EN page 已取得，不需額外請求 JA page；XPath 使用英文 header）
             table_data = self._extract_table_data(resp.content)
+            duration = table_data['duration']
+            if duration is None:
+                duration = self._duration_from_json_ld(json_ld)
 
             rate_limit(self.config.delay)
 
@@ -211,7 +281,7 @@ class HEYZOScraper(BaseScraper):
                 rating=rating,
                 votes=votes,
                 series=table_data['series'],
-                duration=table_data['duration'],
+                duration=duration,
                 sample_images=table_data['sample_images'],
             )
 

@@ -19,7 +19,7 @@ from core.scraper import (
     is_prefix_only,
     search_jav,
 )
-from core.scrapers.models import Video
+from core.scrapers.models import Video, Actress
 
 
 class TestIsNumberFormat:
@@ -255,7 +255,7 @@ class TestAutoFanOutQueryRouting:
         javdb_video = Video(
             number="SONE-205",
             title="JavDB Title",
-            actresses=[],
+            actresses=[Actress(name="Actor A")],
             source="javdb",
         )
 

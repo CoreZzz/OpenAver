@@ -5,6 +5,7 @@ from unittest.mock import patch
 from core.enricher import (
     _missing_fields,
     _merge_meta,
+    _profile_alias_strings,
     _scraper_to_meta,
     _write_cover,
     _write_extrafanart,
@@ -39,6 +40,17 @@ def test_scraper_to_meta_defaults_no_metatube():
     assert meta["rating"] is None
     assert meta["actress_aliases"] == {}
     assert meta["actress_profiles"] == []
+
+
+def test_profile_alias_strings_collects_known_alias_fields():
+    aliases = _profile_alias_strings({
+        "aliases": [{"ja": "A", "romaji": "A Romaji"}, "B"],
+        "other_names": ["C"],
+        "also_known_as": ["D"],
+        "aka": ["A"],
+    })
+
+    assert aliases == ["A", "A Romaji", "B", "C", "D"]
 
 
 # ─── _merge_meta 透傳 ───
@@ -237,6 +249,76 @@ def test_write_cover_falls_back_to_local_video_frame_when_remote_fails(tmp_path)
         ) is True
 
     assert Path(mock_frame.call_args.args[1]) == sidecar_root / "ABC-123" / "cover.jpg"
+
+
+def test_enrich_single_fc2_scraper_miss_writes_minimal_nfo_and_frame_cover(tmp_path):
+    import xml.etree.ElementTree as ET
+
+    from core.database import Video, VideoRepository, init_db
+    from core.enricher import enrich_single
+    from core.path_utils import to_file_uri
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    repo = VideoRepository(db_path)
+    video_path = tmp_path / "media" / "FC2PPV-1234567.mp4"
+    video_path.parent.mkdir()
+    video_path.write_bytes(b"video")
+    path_uri = to_file_uri(str(video_path))
+    repo.upsert(Video(
+        path=path_uri,
+        number="FC2-PPV-1234567",
+        title="FC2PPV-1234567",
+        size_bytes=video_path.stat().st_size,
+    ))
+
+    sidecar_root = tmp_path / "Metadata"
+    config = {
+        "sidecar": {
+            "mode": "centralized",
+            "root_dir": str(sidecar_root),
+            "layout": "{maker}/{num}",
+            "nfo_filename": "{num}.nfo",
+            "cover_filename": "cover.jpg",
+        }
+    }
+
+    def fake_frame_cover(_fs_path: str, cover_path: str) -> bool:
+        Path(cover_path).write_bytes(b"cover" * 300)
+        return True
+
+    with (
+        patch("core.enricher.VideoRepository", return_value=repo),
+        patch("core.enricher.search_jav", return_value=None) as mock_search,
+        patch("core.enricher._write_video_frame_cover", side_effect=fake_frame_cover),
+    ):
+        result = enrich_single(
+            file_path=path_uri,
+            number="FC2-PPV-1234567",
+            mode="fill_missing",
+            write_nfo=True,
+            write_cover=True,
+            sidecar_config=config,
+        )
+
+    assert result.success is True
+    assert result.source_used == "fc2_fallback"
+    mock_search.assert_called_once()
+
+    nfo_path = sidecar_root / "FC2" / "FC2-PPV-1234567" / "FC2-PPV-1234567.nfo"
+    cover_path = sidecar_root / "FC2" / "FC2-PPV-1234567" / "cover.jpg"
+    assert nfo_path.is_file()
+    assert cover_path.is_file()
+    root = ET.parse(nfo_path).getroot()
+    assert "FC2-PPV-1234567" in (root.findtext("title") or "")
+    assert root.findtext("studio") == "FC2"
+    assert root.findtext("thumb") == "cover.jpg"
+
+    updated = repo.get_by_path(path_uri)
+    assert updated is not None
+    assert updated.cover_path == to_file_uri(str(cover_path))
+    assert updated.nfo_mtime > 0
+    assert updated.maker == "FC2"
 
 
 def test_enrich_single_syncs_existing_sidecar_cover_for_complete_db_meta(tmp_path):

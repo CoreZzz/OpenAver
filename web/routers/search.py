@@ -427,9 +427,14 @@ def _fetch_actress_profile_with_db(top_actor: str, makers: list) -> Optional[dic
     if profile:
         profile["is_favorite"] = False
         # 補齊前端需要的頂層欄位（orchestrator legacy flat shape 缺 aliases/tags 等）
-        from web.routers.actress import _flatten_aliases
+        from web.routers.actress import _collect_profile_names
         text = profile.get("text") or {}
-        profile["aliases"] = _flatten_aliases(text.get("aliases"))
+        primary_name = profile.get("name") or top_actor
+        profile["aliases"] = [
+            candidate
+            for candidate in _collect_profile_names(profile, top_actor)
+            if candidate != primary_name
+        ]
         profile["tags"] = text.get("tags") or []
         profile["agency"] = text.get("agency")
         profile["nickname"] = text.get("nickname")

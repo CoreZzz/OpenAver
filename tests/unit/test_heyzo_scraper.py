@@ -214,6 +214,7 @@ class TestNoSeries:
 HEYZO_EN_HTML = b"""
 <html>
 <head>
+<meta charset="utf-8">
 <script type="application/ld+json">
 {
     "@type": "Movie",
@@ -233,6 +234,55 @@ HEYZO_EN_HTML = b"""
 </body>
 </html>
 """
+
+HEYZO_JA_HTML = """
+<html>
+<head>
+<meta charset="utf-8">
+<script type="application/ld+json">
+{
+    "@type": "Movie",
+    "name": "続々生中～快感にのけぞる絶品ボディ～",
+    "actor": {"@type": "Person", "name": "立花瑠莉"},
+    "dateCreated": "2018-02-03T00:00:00+09:00",
+    "duration": "PT0H53M32S",
+    "image": "//www.heyzo.com/contents/3000/1660/images/player_thumbnail.jpg",
+    "aggregateRating": {"ratingValue": 4.6, "reviewCount": 22}
+}
+</script>
+</head>
+<body>
+<table class="movieInfo">
+<tr><td>シリーズ</td><td>続々生中</td></tr>
+<tr><td>女優タイプ</td><td><a>美乳</a> <a>巨乳</a></td></tr>
+<tr><td>タグキーワード</td><td><a>騎乗位</a> <a>中出し</a></td></tr>
+</table>
+</body>
+</html>
+""".encode("utf-8")
+
+HEYZO_JA_NO_JSON_HTML = """
+<html>
+<head>
+<meta charset="utf-8">
+<title>さくらみな 【さくらみな】 さくらみながお漏らししちゃった！ - 無修正アダルト動画 HEYZO</title>
+</head>
+<body>
+<table class="movieInfo">
+<tr><td>公開日</td><td>2024-05-02</td></tr>
+<tr><td>出演</td><td>さくらみな</td></tr>
+<tr><td>シリーズ</td><td>-----</td></tr>
+<tr><td>女優タイプ</td><td><a>AV女優</a> <a>スレンダー</a></td></tr>
+<tr><td>タグキーワード</td><td><a>お漏らし</a></td></tr>
+</table>
+<script>
+heyzo.duration = function(){
+  return {"full":"00:20:41"};
+};
+</script>
+</body>
+</html>
+""".encode("utf-8")
 
 
 def _make_mock_resp(status_code=200, json_data=None, content=None):
@@ -275,6 +325,43 @@ class TestHEYZOIntegration:
         assert video.source == "heyzo"
         assert video.maker == "HEYZO"
         assert video.rating == 4.22
+
+    def test_heyzo_prefers_japanese_page(self, scraper):
+        """HEYZO should use Japanese official metadata when available."""
+        mock_resp = _make_mock_resp(status_code=200, content=HEYZO_JA_HTML)
+
+        with patch.object(scraper._session, 'get', return_value=mock_resp):
+            with patch('core.scrapers.heyzo.rate_limit'):
+                video = scraper.search("HEYZO-1660")
+
+        assert video is not None
+        assert video.number == "HEYZO-1660"
+        assert video.title == "続々生中～快感にのけぞる絶品ボディ～"
+        assert [a.name for a in video.actresses] == ["立花瑠莉"]
+        assert video.date == "2018-02-03"
+        assert video.cover_url == "https://www.heyzo.com/contents/3000/1660/images/player_thumbnail.jpg"
+        assert video.series == "続々生中"
+        assert video.duration == 53
+        assert video.tags == ["美乳", "巨乳", "騎乗位", "中出し"]
+        assert video.rating == 4.6
+
+    def test_heyzo_japanese_html_fallback_without_json_ld(self, scraper):
+        """Japanese HEYZO pages without JSON-LD should not fall back to English."""
+        mock_resp = _make_mock_resp(status_code=200, content=HEYZO_JA_NO_JSON_HTML)
+
+        with patch.object(scraper._session, 'get', return_value=mock_resp):
+            with patch('core.scrapers.heyzo.rate_limit'):
+                video = scraper.search("HEYZO-3312")
+
+        assert video is not None
+        assert video.number == "HEYZO-3312"
+        assert video.title == "さくらみながお漏らししちゃった！"
+        assert [a.name for a in video.actresses] == ["さくらみな"]
+        assert video.date == "2024-05-02"
+        assert video.cover_url == "https://www.heyzo.com/contents/3000/3312/images/player_thumbnail.jpg"
+        assert video.series == ""
+        assert video.duration == 20
+        assert video.tags == ["AV女優", "スレンダー", "お漏らし"]
 
     def test_heyzo_strip_prefix(self, scraper):
         """_extract_heyzo_num 正確提取數字 ID（純邏輯，不需 mock）"""

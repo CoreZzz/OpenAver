@@ -436,6 +436,10 @@ _WESTERN_SITE_HINTS = {
 _EXACT_UNCENSORED_KINDS = {"fc2", "heyzo", "date_uncensored", "tokyo_hot", "avsox_uncensored"}
 
 
+def _video_needs_actor_backfill(video) -> bool:
+    return not bool(getattr(video, "actresses", None))
+
+
 def _query_kind(identity) -> str:
     number = (getattr(identity, "canonical_number", None) or "").upper()
     if not number:
@@ -753,29 +757,40 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '',
             return found
 
         standard_fanout_sids = []
+        merge_order_sids = list(enabled_sids)
         if query_kind in _EXACT_UNCENSORED_KINDS:
             for sid in enabled_sids:
                 if run_source(sid):
-                    enabled_sids = [sid]
+                    merge_order_sids = [sid]
+                    break
+        else:
+            priority_hits: list[str] = []
+            priority_complete = False
+            for priority_sid in ('javdb', 'missav'):
+                if priority_sid not in enabled_sids:
+                    continue
+                priority_result = run_source(priority_sid)
+                enabled_sids = [sid for sid in enabled_sids if sid != priority_sid]
+                if not priority_result:
+                    continue
+                priority_hits.append(priority_sid)
+                if not _video_needs_actor_backfill(priority_result):
+                    priority_complete = True
                     break
 
-        priority_sids = () if query_kind in _EXACT_UNCENSORED_KINDS else ('javdb', 'missav')
-        for priority_sid in priority_sids:
-            if priority_sid not in enabled_sids:
+            if priority_hits:
+                if priority_complete:
+                    merge_order_sids = priority_hits
+                else:
+                    standard_fanout_sids = enabled_sids
+                    merge_order_sids = [*priority_hits, *enabled_sids]
+            else:
+                standard_fanout_sids = enabled_sids
+                merge_order_sids = enabled_sids
+
+        for sid in standard_fanout_sids:
+            if sid in results_by_source:
                 continue
-            priority_result = run_source(priority_sid)
-            if priority_result:
-                enabled_sids = [priority_sid]
-                break
-            enabled_sids = [sid for sid in enabled_sids if sid != priority_sid]
-
-        if query_kind not in _EXACT_UNCENSORED_KINDS:
-            standard_fanout_sids = enabled_sids
-
-        if results_by_source:
-            enabled_sids = [sid for sid in enabled_sids if sid in results_by_source]
-
-        for sid in ([] if results_by_source else standard_fanout_sids):
             factory = source_to_scraper.get(sid)
             if not factory:
                 continue
@@ -827,7 +842,7 @@ def search_jav(number: str, source: str = 'auto', proxy_url: str = '',
         # v.source == sid，對 builtin 和 metatube 均成立（mapper 設 source='metatube:{provider}'）
         all_data = {
             sid: results_by_source[sid]
-            for sid in enabled_sids
+            for sid in merge_order_sids
             if sid in results_by_source
         }
     else:

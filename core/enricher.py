@@ -283,6 +283,42 @@ def _missing_fields(meta: dict, number: str = "") -> List[str]:
     return missing
 
 
+def _is_fc2_number(value: str) -> bool:
+    identity = parse_media_identity(value)
+    canonical = identity.canonical_number or str(value or "").strip().upper()
+    return canonical.startswith("FC2-PPV-")
+
+
+def _fc2_fallback_meta(number: str, base: dict | None = None) -> dict:
+    """Build minimal FC2 metadata so NFO/frame-cover fallback can still run."""
+    identity = parse_media_identity(number)
+    canonical = identity.canonical_number or str(number or "").strip().upper()
+    current = dict(base or {})
+    title = str(current.get("title") or "").strip()
+    if not title or is_filename_placeholder_title(title, canonical):
+        title = canonical
+
+    return {
+        "title": title,
+        "original_title": current.get("original_title", ""),
+        "actresses": current.get("actresses") or [],
+        "maker": current.get("maker") or "FC2",
+        "director": current.get("director", ""),
+        "series": current.get("series", ""),
+        "label": current.get("label", ""),
+        "tags": current.get("tags") or ["FC2"],
+        "release_date": current.get("release_date", ""),
+        "duration": current.get("duration"),
+        "cover_url": current.get("cover_url", ""),
+        "url": current.get("url", ""),
+        "sample_images": current.get("sample_images") or [],
+        "summary": current.get("summary", ""),
+        "rating": current.get("rating"),
+        "actress_aliases": current.get("actress_aliases", {}),
+        "actress_profiles": current.get("actress_profiles", []),
+    }
+
+
 def _merge_meta(base: dict, supplement: dict, number: str = "") -> tuple:
     """合併 base + supplement，回傳 (merged, fields_filled)"""
     merged = dict(base)
@@ -726,6 +762,32 @@ def _list_strings(value) -> List[str]:
     return out
 
 
+def _alias_strings(value) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    out: List[str] = []
+    for item in value:
+        candidates = []
+        if isinstance(item, dict):
+            candidates = [item.get("ja"), item.get("name"), item.get("romaji")]
+        else:
+            candidates = [item]
+        for candidate in candidates:
+            text = str(candidate or "").strip()
+            if text and text not in out:
+                out.append(text)
+    return out
+
+
+def _profile_alias_strings(profile: dict) -> List[str]:
+    aliases: List[str] = []
+    for key in ("aliases", "other_names", "also_known_as", "aka"):
+        for alias in _alias_strings(profile.get(key)):
+            if alias not in aliases:
+                aliases.append(alias)
+    return aliases
+
+
 def _sync_actress_metadata(meta: dict) -> None:
     profiles = meta.get("actress_profiles") or []
     alias_map = meta.get("actress_aliases") or {}
@@ -742,7 +804,7 @@ def _sync_actress_metadata(meta: dict) -> None:
         name = str(profile.get("name") or "").strip()
         if not name:
             continue
-        aliases = _list_strings(profile.get("aliases"))
+        aliases = _profile_alias_strings(profile)
         actress = Actress(
             name=name,
             name_en=str(profile.get("name_en") or "").strip() or None,
@@ -842,11 +904,15 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
             scraper_data = search_jav(number, proxy_url=proxy_url,
                                       source=source or 'auto', javbus_lang=javbus_lang)
         if not scraper_data:
-            _empty.error = f"找不到 {number} 的資料"
-            return _empty
-        number = str(scraper_data.get("number") or number).strip() or number
-        meta = _scraper_to_meta(scraper_data)
-        source_used = scraper_data.get("source", "scraper") or "scraper"
+            if not _is_fc2_number(number):
+                _empty.error = f"找不到 {number} 的資料"
+                return _empty
+            meta = _fc2_fallback_meta(number, _video_to_meta(existing_record) if existing_record else {})
+            source_used = "fc2_fallback"
+        else:
+            number = str(scraper_data.get("number") or number).strip() or number
+            meta = _scraper_to_meta(scraper_data)
+            source_used = scraper_data.get("source", "scraper") or "scraper"
 
     elif mode == "db_to_sidecar":
         video = existing_record or _first_video_by_number(repo, number)
@@ -922,9 +988,15 @@ def enrich_single(  # noqa: ranker-invalidate (only updates nfo_mtime, not a cor
             if not scraper_data:
                 if not discovered_sidecar:
                     if not metadata_override_fields:
-                        _empty.error = f"找不到 {number} 的資料"
-                        return _empty
-                    skip_new_nfo_for_override_only = True
+                        if not _is_fc2_number(number):
+                            _empty.error = f"找不到 {number} 的資料"
+                            return _empty
+                        fallback = _fc2_fallback_meta(number, meta)
+                        meta, fallback_fields = _merge_meta(meta, fallback, number=number)
+                        fields_filled.extend(f for f in fallback_fields if f not in fields_filled)
+                        source_used = "fc2_fallback"
+                    else:
+                        skip_new_nfo_for_override_only = True
             else:
                 number = str(scraper_data.get("number") or number).strip() or number
                 supplement = _scraper_to_meta(scraper_data)

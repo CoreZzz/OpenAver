@@ -21,12 +21,13 @@ from urllib.parse import quote
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from core.config import load_config
 from core.maker_mapping import load_prefix_mapping
 
 from core.database import ActressRepository, AliasRepository, VideoRepository, Actress, init_db
 from core.actress_photo import download_actress_photo, get_local_photo_path, delete_local_photo, crop_video_cover, GFRIENDS_DIR
 from core.organizer import sanitize_filename
-from core.path_utils import to_file_uri, uri_to_fs_path, coerce_to_file_uri
+from core.path_utils import to_file_uri, uri_to_fs_path, coerce_to_file_uri, is_path_under_dir
 from core.scrapers.actress.orchestrator import (
     get_cached_profile,
     get_actress_profile,
@@ -216,7 +217,11 @@ def _build_actress_from_profile(
 ) -> Actress:
     text = profile.get("text") or {}
     name = profile.get("name") or fallback_name
-    alias_names = aliases if aliases is not None else _flatten_aliases(text.get("aliases"))
+    alias_names = aliases if aliases is not None else [
+        candidate
+        for candidate in _collect_profile_names(profile, fallback_name)
+        if candidate != name
+    ]
     alias_names = [alias for alias in _merge_unique_strings(alias_names) if alias != name]
 
     return Actress(
@@ -350,6 +355,10 @@ def _count_actress_work_cards(
     try:
         names = list(alias_repo.resolve(name))
         videos = VideoRepository().get_videos_by_actress_names(names)
+        scoped_videos = _filter_uncensored_gallery_videos(videos)
+        scoped_count = _count_work_cards_for_videos(scoped_videos)
+        if scoped_count > 0:
+            return scoped_count
         return _count_work_cards_for_videos(videos)
     except Exception as e:
         logger.error("[actress] work-card count failed for %r: %s", name, e)
@@ -358,6 +367,69 @@ def _count_actress_work_cards(
 
 def _count_work_cards_for_videos(videos: list) -> int:
     return len(_group_videos_by_work(videos))
+
+
+def _uncensored_gallery_dir_uris(config: Optional[dict] = None) -> list[str]:
+    """Return gallery directories explicitly labelled as uncensored.
+
+    An empty result means no scope is configured, so callers keep legacy
+    all-library behavior in tests and unlabelled installs.
+    """
+    try:
+        cfg = config if config is not None else load_config()
+    except Exception as e:
+        logger.warning("[actress] load gallery scope failed: %s", e)
+        return []
+
+    gallery = cfg.get("gallery") if isinstance(cfg, dict) else {}
+    if not isinstance(gallery, dict):
+        return []
+
+    directories = gallery.get("directories") or []
+    labels = gallery.get("directory_labels") or {}
+    path_mappings = gallery.get("path_mappings") or {}
+    if not isinstance(labels, dict):
+        return []
+
+    dir_uris: list[str] = []
+    for directory in directories:
+        directory_text = str(directory or "").strip()
+        if not directory_text:
+            continue
+        label = str(labels.get(directory_text, "") or "").strip().lower()
+        if label != "uncensored":
+            continue
+        try:
+            dir_uri = coerce_to_file_uri(directory_text, path_mappings)
+        except Exception:
+            try:
+                dir_uri = to_file_uri(directory_text, path_mappings)
+            except Exception as e:
+                logger.warning("[actress] invalid gallery directory skipped: %s", e)
+                continue
+        if dir_uri not in dir_uris:
+            dir_uris.append(dir_uri)
+    return dir_uris
+
+
+def _filter_uncensored_gallery_videos(videos: list, dir_uris: Optional[list[str]] = None) -> list:
+    dir_uris = _uncensored_gallery_dir_uris() if dir_uris is None else dir_uris
+    if not dir_uris:
+        return videos
+
+    scoped = []
+    for video in videos:
+        raw_path = str(getattr(video, "path", "") or "").strip()
+        if not raw_path:
+            continue
+        try:
+            video_uri = coerce_to_file_uri(raw_path)
+        except Exception as e:
+            logger.warning("[actress] video path scope check failed path=%s: %s", raw_path, e)
+            continue
+        if any(is_path_under_dir(video_uri, dir_uri) for dir_uri in dir_uris):
+            scoped.append(video)
+    return scoped
 
 
 def _build_local_actress_from_videos(
@@ -394,6 +466,7 @@ def _build_local_actress_from_videos(
 
     try:
         videos = VideoRepository().get_videos_by_actress_names(query_names)
+        videos = _filter_uncensored_gallery_videos(videos)
     except Exception as e:
         logger.warning("[actress] local favorite video lookup failed for %r: %s", name, e)
         return None
@@ -754,6 +827,7 @@ def _infer_gfriends_makers(actress_name: str) -> Optional[list[str]]:
 
     try:
         videos = VideoRepository().get_videos_by_actress_names(names)
+        videos = _filter_uncensored_gallery_videos(videos)
     except Exception as e:
         logger.warning("[actress] gfriends maker video lookup failed: %s", e)
         return None
@@ -817,6 +891,7 @@ def _get_random_videos_with_covers(actress_name: str, count: int) -> list:
         alias_repo = AliasRepository()
         names = list(alias_repo.resolve(actress_name))  # 雙向展開；無 alias 時回 {actress_name}
         videos = repo.get_videos_by_actress_names(names)
+        videos = _filter_uncensored_gallery_videos(videos)
         with_covers = [v for v in videos if v.cover_path]
         random.shuffle(with_covers)
         return with_covers[:count]
@@ -1000,6 +1075,7 @@ async def set_actress_photo(name: str, req: SetActressPhotoRequest):
             logger.warning("[actress] local_crop alias resolve 失敗 name=%s: %s", actress_name, e)
             actress_names = [actress_name]
         videos = video_repo.get_videos_by_actress_names(actress_names)
+        videos = _filter_uncensored_gallery_videos(videos)
         # Fix 3 (T3): v.path 在 DB 存 file:/// URI（gallery_scanner 用 to_file_uri 寫入），
         # 比對前雙邊都正規化為 FS path，避免 URI vs FS path 永遠 fail
         match = next(

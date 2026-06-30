@@ -104,6 +104,14 @@ class FC2Scraper(BaseScraper):
                 return item
         return {}
 
+    def _product_json_ld(self, html) -> dict:
+        for item in self._json_ld_objects(html):
+            raw_type = item.get("@type")
+            types = raw_type if isinstance(raw_type, list) else [raw_type]
+            if any(str(value).lower() == "product" for value in types):
+                return item
+        return {}
+
     def _normalize_date(self, value: str) -> str:
         text = str(value or "").strip().replace("/", "-")
         match = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", text)
@@ -143,6 +151,8 @@ class FC2Scraper(BaseScraper):
         image = movie.get("image") if isinstance(movie, dict) else ""
         if isinstance(image, list):
             image = image[0] if image else ""
+        if isinstance(image, dict):
+            image = image.get("url", "")
         return self._downloadable_image_url(str(image or ""))
 
     def _json_ld_tags(self, movie: dict) -> list[str]:
@@ -280,6 +290,103 @@ class FC2Scraper(BaseScraper):
         text = " ".join(tags) + " " + title
         return any(kw in text for kw in ["無修正", "无修正", "uncensored"])
 
+    def _official_url(self, fc2_number: str) -> str:
+        return f"https://adult.contents.fc2.com/article/{fc2_number}/"
+
+    def _official_not_found(self, html) -> bool:
+        text = html.xpath("string()")
+        return "\u304a\u63a2\u3057\u306e\u5546\u54c1\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093" in text
+
+    def _official_title(self, html, product: dict, fc2_number: str) -> str:
+        title = str(product.get("name") or "").strip()
+        if not title:
+            result = html.xpath('//meta[@property="og:title"]/@content')
+            title = str(result[0]).strip() if result else ""
+        for prefix in (f"FC2-PPV-{fc2_number}", f"FC2-{fc2_number}"):
+            if title.startswith(prefix):
+                title = title[len(prefix):].strip()
+        return title
+
+    def _official_date(self, html) -> str:
+        text = html.xpath("string()")
+        match = re.search(r"(20\d{2})[/-](\d{1,2})[/-](\d{1,2})", text)
+        if not match:
+            return ""
+        year, month, day = match.groups()
+        return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+    def _official_summary(self, html, product: dict) -> str:
+        summary = str(product.get("description") or "").strip()
+        if summary:
+            return summary
+        result = html.xpath(
+            '//meta[@property="og:description"]/@content | //meta[@name="description"]/@content'
+        )
+        return str(result[0]).strip() if result else ""
+
+    def _official_brand(self, product: dict) -> str:
+        brand = product.get("brand") if isinstance(product, dict) else {}
+        if isinstance(brand, dict):
+            name = str(brand.get("name") or "").strip()
+            if name:
+                return name
+        return "FC2"
+
+    def _official_sample_images(self, html) -> list[str]:
+        urls: list[str] = []
+        for url in html.xpath("//img/@src"):
+            text = self._downloadable_image_url(url)
+            if (
+                "contents-thumbnail2.fc2.com/w276/" in text
+                or "contents-thumbnail2.fc2.com/w480/" in text
+            ):
+                urls.append(text)
+        return self._dedupe_urls(urls)
+
+    def _search_official(self, fc2_number: str) -> Optional[Video]:
+        detail_url = self._official_url(fc2_number)
+        try:
+            resp = self._session.get(detail_url, timeout=self.config.timeout)
+            if resp.status_code != 200:
+                return None
+
+            html = etree.fromstring(resp.content, etree.HTMLParser())
+            if self._official_not_found(html):
+                return None
+
+            product = self._product_json_ld(html)
+            title = self._official_title(html, product, fc2_number)
+            if not title:
+                return None
+
+            cover_url = self._json_ld_image(product) or self._get_cover(html)
+            sample_images = self._official_sample_images(html)
+            if cover_url and cover_url not in sample_images:
+                sample_images.insert(0, cover_url)
+
+            return Video(
+                number=f"FC2-PPV-{fc2_number}",
+                title=title,
+                actresses=[],
+                date=self._official_date(html),
+                maker=self._official_brand(product),
+                cover_url=cover_url,
+                tags=["\u7121\u4fee\u6b63"],
+                source=self.source_name,
+                detail_url=detail_url,
+                sample_images=sample_images,
+                summary=self._official_summary(html, product),
+                rating=(
+                    float(product["aggregateRating"]["ratingValue"])
+                    if isinstance(product.get("aggregateRating"), dict)
+                    and str(product["aggregateRating"].get("ratingValue") or "").strip()
+                    else None
+                ),
+            )
+        except Exception as e:
+            logger.debug(f"FC2 official fallback failed for {fc2_number}: {e}")
+            return None
+
     def _search_url(self, fc2_number: str) -> Optional[str]:
         """搜尋並取得詳情頁 URL"""
         search_url = f"{self.BASE_URL}/search?kw={fc2_number}"
@@ -331,6 +438,11 @@ class FC2Scraper(BaseScraper):
         fc2_number = self._normalize_fc2_number(number)
 
         try:
+            official_video = self._search_official(fc2_number)
+            if official_video:
+                rate_limit(self.config.delay)
+                return official_video
+
             # 搜尋取得詳情頁 URL
             detail_url = self._search_url(fc2_number)
             if not detail_url:

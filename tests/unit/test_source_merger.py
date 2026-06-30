@@ -68,6 +68,22 @@ def test_text_source_empty_field_falls_back():
     assert merged.source == "jav321"
 
 
+def test_internal_actress_metadata_backfills_from_later_source():
+    primary = _v("javdb", title="JavDB Title", actresses=[Actress(name="Alice")])
+    backup = _v(
+        "theporndb",
+        title="TPDB Title",
+        actress_aliases={"Alice": ["Alicia"]},
+        actress_profiles=[{"name": "Alice", "height": 170}],
+    )
+    merged = merge_results({"javdb": primary, "theporndb": backup},
+                           user_order=["javdb", "theporndb"])
+
+    assert merged.source == "javdb"
+    assert merged.actress_aliases == {"Alice": ["Alicia"]}
+    assert merged.actress_profiles == [{"name": "Alice", "height": 170}]
+
+
 def test_label_backfills_from_later_source():
     """label parity (61a-6 review B1): text_source empty label → backfill from later source.
 
@@ -200,5 +216,4 @@ def test_text_source_keys_not_in_user_order_falls_back_to_insertion_order():
 def test_empty_candidates_returns_none():
     """defensive: empty candidates → None (caller guards before merge)."""
     assert merge_results({}, user_order=["javbus"]) is None
-
 

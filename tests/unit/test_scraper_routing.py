@@ -17,7 +17,7 @@ from core.scraper import (
     strip_internal_nfo_keys,
     _INTERNAL_NFO_KEYS,
 )
-from core.scrapers.models import Video
+from core.scrapers.models import Video, Actress
 from core.scrapers.utils import SOURCE_ORDER
 
 
@@ -384,6 +384,26 @@ class TestParallelFanOutOrdering:
         assert result is not None
         # all_data rebuild 按 user order (A, B) → merge winner = A（user order first）
         assert result['_source'] == 'metatube:A'
+
+    def test_priority_result_without_actors_backfills_from_later_source(self, monkeypatch):
+        def _mock_enabled(availability_map=None):
+            return ['javdb', 'javbus']
+
+        monkeypatch.setattr("core.scraper.get_enabled_source_ids", _mock_enabled)
+        monkeypatch.setattr("core.scraper.metatube_state", _mock_state(is_connected=False))
+
+        javdb_video = _make_video("javdb", "SONE-205")
+        javbus_video = _make_video("javbus", "SONE-205").model_copy(
+            update={"actresses": [Actress(name="Actor A")]}
+        )
+
+        with patch("core.scrapers.javdb.JavDBScraper.search", return_value=javdb_video):
+            with patch("core.scrapers.javbus.JavBusScraper.search", return_value=javbus_video):
+                result = search_jav("SONE-205", source='auto')
+
+        assert result is not None
+        assert result['_source'] == 'javdb'
+        assert result['actors'] == ["Actor A"]
 
     def test_interleaved_order_metatube_before_builtin(self, monkeypatch):
         """enabled_sids = ['metatube:A', 'javbus', 'metatube:B']

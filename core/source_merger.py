@@ -27,6 +27,7 @@ _TEXT_FIELDS = ('title', 'actresses', 'tags', 'series', 'maker', 'director')
 _STR_META_FIELDS = ('date', 'label')
 # None-sentinel meta 欄位（0 / 0.0 視為有值）
 _OPTIONAL_META_FIELDS = ('duration', 'rating', 'votes')
+_INTERNAL_ACTRESS_FIELDS = ('actress_aliases', 'actress_profiles')
 
 
 def _is_empty(value: object, none_sentinel: bool) -> bool:
@@ -60,6 +61,37 @@ def _first_non_empty(videos: list[Video], field: str, none_sentinel: bool):
         if not _is_empty(value, none_sentinel):
             return value
     return None
+
+
+def _merged_actress_aliases(videos: list[Video]) -> dict[str, list[str]]:
+    merged: dict[str, list[str]] = {}
+    for video in videos:
+        for name, aliases in (video.actress_aliases or {}).items():
+            key = str(name or "").strip()
+            if not key:
+                continue
+            merged.setdefault(key, [])
+            for alias in aliases or []:
+                text = str(alias or "").strip()
+                if text and text not in merged[key]:
+                    merged[key].append(text)
+    return merged
+
+
+def _merged_actress_profiles(videos: list[Video]) -> list[dict[str, object]]:
+    merged: list[dict[str, object]] = []
+    seen_names: set[str] = set()
+    for video in videos:
+        for profile in video.actress_profiles or []:
+            if not isinstance(profile, dict):
+                continue
+            name = str(profile.get("name") or "").strip()
+            key = name or str(profile)
+            if key in seen_names:
+                continue
+            seen_names.add(key)
+            merged.append(profile)
+    return merged
 
 
 def merge_results(
@@ -104,5 +136,15 @@ def merge_results(
         value = _first_non_empty(cover_ordered, field, none_sentinel=False)
         if value is not None:
             updates[field] = value
+
+    for field in _INTERNAL_ACTRESS_FIELDS:
+        if _is_empty(getattr(text_source, field), none_sentinel=False):
+            fallback = (
+                _merged_actress_aliases(text_ordered)
+                if field == 'actress_aliases'
+                else _merged_actress_profiles(text_ordered)
+            )
+            if fallback:
+                updates[field] = fallback
 
     return text_source.model_copy(update=updates) if updates else text_source
